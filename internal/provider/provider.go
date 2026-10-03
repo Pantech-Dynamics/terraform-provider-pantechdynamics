@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -117,7 +118,9 @@ func newClient(cfg providerModel, version string) (*client.Client, diag.Diagnost
 
 // Resources lists the resources this provider offers.
 func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource.Resource {
-	return nil
+	return []func() resource.Resource{
+		sshkey.New,
+	}
 }
 
 // DataSources lists the data sources this provider offers.
