@@ -108,3 +108,10 @@ func newAPIError(status int, body []byte) *APIError {
 	}
 	return apiErr
 }
+
+// HasCode reports whether err is an APIError with the given problem code. It
+// lets callers branch on a specific backend code without unpacking the error.
+func HasCode(err error, code string) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Code == code
+}
