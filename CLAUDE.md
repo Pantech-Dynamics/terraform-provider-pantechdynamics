@@ -82,7 +82,7 @@ The owner is learning while building. Code must be readable by a developer who k
 - Typed request and response structs with JSON tags. No `map[string]any` for known shapes.
 - Map HTTP status to typed errors in one place (404 -> `ErrNotFound`, 401/403 -> auth error, 429 -> rate limited, 4xx -> `APIError` carrying the backend message).
 - Client has a configurable base URL, timeout and user agent (`terraform-provider-pantechdynamics/<version>`).
-- Retries (max 3 attempts, backoff with jitter, honours `Retry-After`): GET retries on 429, 5xx and transport errors. Every method retries on 429, because the request was rejected before it ran. POST, PUT and DELETE are NOT retried on 5xx or transport errors by default, because some endpoints (ssh-key create and delete) do not replay on an `Idempotency-Key`. A call opts in with `replaySafe()` only once that endpoint is verified to replay.
+- Retries (max 3 attempts, backoff with jitter, honours `Retry-After`): GET retries on 429, any 5xx and transport errors. Every method retries 429, because the request was rejected before it ran. POST, PUT and DELETE are NOT retried by default, because ssh-key create and delete do not replay on an `Idempotency-Key`. A call opts in with `replaySafe()` only for an endpoint verified to replay, and then it retries transport errors and 502, 503, 504, never a plain 500 (the backend returns 500 for deterministic failures such as a duplicate security group name, and one such call took 45 seconds).
 - On an ambiguous create failure (transport error or 5xx), the resource lists and matches before failing, for example by `fingerprint` for ssh keys, and adopts the object if it exists.
 - Async operations: poll a `status` field with a context-aware loop and a timeout. Put the polling helper in one place.
 
@@ -163,7 +163,10 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 - **Latency:** most calls take 0.8 to 2.2 seconds, but DELETE and a 422 validation each took about 11 seconds, and in one run a 422 create and a `GET /ssh-keys/zzz` hung past 60 seconds (not reproducible on retry). **(verified)** Keep a timeout of 60 seconds, and expect GET retries on transport errors to matter.
 - **Pagination:** lists return `{"data":[...],"next_cursor":...}`. Pass `next_cursor` back as `cursor` until it is `null`. Default `limit` is 50, maximum 100 (docs). **(verified for ssh-keys: `next_cursor` is always `null`, the full list is returned, and `limit` is ignored. Other lists unverified.)** Always follow the cursor anyway.
 - **Timestamps and IDs:** RFC 3339 UTC. IDs are prefixed (`sshk_`, `vm_`, `vol_`, `snap_`, `op_`). `created_at` has different precision on create (9 digits) and on GET (6 digits, zeros trimmed) for the same key, so the provider stores it truncated to whole seconds. Found by an acceptance test.
-- **Async behavior:** **(unverified, not yet tested)** creating an instance returns an order, polled with `GET /instance-orders/{order_id}`. Other long operations are polled with `GET /operations/{operation_id}`. Terminal states are not yet documented. Test with a throwaway resource and fill this in before building `instance`.
+- **Async behavior:** writes return `202 {operation_id, resource_id, status}`. `GET /operations/{id}` returns `{id, resource_type, resource_id, kind, status, failure:{code,reason}|null, created_at, updated_at}` with `status` in `submitting | submitted | succeeded | failed`. **(verified for security groups; instances still unverified, see the instance order flow below)**
+  - Create finished in under a second and replace-rules in about 2 seconds, but a **delete operation stayed `submitted` for over an hour** although the group was already gone (`GET` returned 404). The operation is trusted to report failure, not completion: after a delete, finish on the resource being gone. Raise this with the backend team.
+  - Operation and list calls were slow at times: single GETs of 20 to 48 seconds were seen. Poll every 2 seconds, but expect a poll to take long, and keep generous timeouts.
+  - Instance creation returns an order polled with `GET /instance-orders/{order_id}` (unverified). Test with a throwaway resource before building `instance`.
 
 | Resource | Create | Read | List | Delete | Notes |
 |---|---|---|---|---|---|
@@ -190,6 +193,17 @@ Paths above are relative to the base URL.
 - All three need a valid key (401 without), ignore `limit` and `cursor`, and always return `next_cursor: null` with the full list. The client makes one request and fails loudly if a cursor ever appears.
 - Prices are estimates from a display-only cache, in the account's currency, in minor units. Do not treat them as quotes.
 - `GET /zones` is not part of the public API (it timed out). Do not use it.
+
+**security groups and operations** **(verified 2026-10-03 against dev with throwaway `tfprobe-*` groups, all deleted)**
+- Paths: `POST /security-groups`, `GET /security-groups`, `GET /security-groups/{id}`, `PUT /security-groups/{id}/rules`, `DELETE /security-groups/{id}`. The live list is paginated (`limit` honoured, default 50, max 100) and returns `{"data":[...],"next_cursor":...}`. There is no `project_id` in the response, unlike the spec.
+- Object: `{id:"sg_...", name, rules:[{direction, protocol, port_range, cidr}], desired_state:"present", observed_state:"active", created_at, updated_at}`. Rules have no ids. `port_range` is `""` for icmp and for all ports, and must be sent even when empty.
+- `PUT .../rules` replaces the entire set. `[]` is rejected with `422 VALIDATION_FAILED` (no `errors` array), and so is an empty rule list on create: at least one rule is required. The docs say `[]` clears the rules. They are wrong.
+- **Idempotency replay works** for create, PUT and DELETE: re-sending the same key returned the same `operation_id` and `resource_id`. Re-sending with a different body also returned the original instead of a conflict (the docs promise `IDEMPOTENCY_CONFLICT`), so never rely on a conflict to catch a reused key.
+- A GET right after create is consistent with the create call, and a deleted group returns `404 RESOURCE_NOT_FOUND`. A second DELETE of a gone group returns `202` with a **new** operation, not 404, so delete is idempotent.
+- **Backend bugs to report:** a duplicate name returns `500 INTERNAL` after about 45 seconds (not 409), and a 300-character name returns `500 INTERNAL` (the spec says max 255). Both are deterministic. Check duplicates by listing before create, and validate the name length at plan time.
+- **A deleted group's name stays reserved.** Creating a group with the name of one deleted minutes earlier returns `500 INTERNAL` (a deleted group already returns 404, and the list does not show it). It was still refused about 5 minutes after the delete. So a name cannot be reused soon after a delete, and the provider can only add a hint to the error. A rename replaces the group under a new name, so it is unaffected. Raise this with the backend team.
+- Delete is refused with `409 INVALID_RESOURCE_STATE` while an instance uses the group, and the `default` group returns `409 DEFAULT_SECURITY_GROUP_UNDELETABLE` (both documented, not exercised). Invalid direction, port or cidr return `422 VALIDATION_FAILED`.
+- The `default` group exists on every account with one ingress icmp rule. VPC subnet firewall rules (`/subnets/{id}/firewall-rules`) are a separate, VPC-only feature and are not part of `pantechdynamics_security_group`.
 
 ## Build order
 
