@@ -59,7 +59,7 @@ func TestFromAPIResponse(t *testing.T) {
 
 	t.Run("maps every field", func(t *testing.T) {
 		m := fromAPIResponse(model{PublicKey: types.StringUnknown(), PrivateKey: types.StringUnknown()}, apiKey)
-		if m.ID.ValueString() != "sshk_1" || m.Fingerprint.ValueString() != "SHA256:x" || m.CreatedAt.ValueString() != "2026-10-03T22:07:37.993992619Z" {
+		if m.ID.ValueString() != "sshk_1" || m.Fingerprint.ValueString() != "SHA256:x" || m.CreatedAt.ValueString() != "2026-10-03T22:07:37Z" {
 			t.Fatalf("m = %+v", m)
 		}
 		if !m.PrivateKey.IsNull() {
@@ -94,6 +94,16 @@ func TestFromAPIResponse(t *testing.T) {
 		m := fromAPIResponse(model{PrivateKey: types.StringUnknown()}, &withPrivate)
 		if m.PrivateKey.ValueString() != "NEW" {
 			t.Fatalf("private_key = %v", m.PrivateKey)
+		}
+	})
+
+	t.Run("created_at is the same whatever precision the API sent", func(t *testing.T) {
+		nanos := time.Date(2026, 10, 3, 22, 35, 3, 908399822, time.UTC)
+		micros := time.Date(2026, 10, 3, 22, 35, 3, 908400000, time.UTC)
+		a, b := *apiKey, *apiKey
+		a.CreatedAt, b.CreatedAt = &nanos, &micros
+		if fromAPIResponse(model{}, &a).CreatedAt != fromAPIResponse(model{}, &b).CreatedAt {
+			t.Fatal("created_at must not depend on fractional seconds")
 		}
 	})
 

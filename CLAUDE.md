@@ -162,7 +162,7 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 - **Rate limit:** dev returned `RateLimit-Limit: 300` per 60s window with `RateLimit-Remaining` and `RateLimit-Reset` on every response. **(verified)** A 429 carries `Retry-After` in seconds (documented, not yet seen). Back off on 429 and avoid parallel refresh storms.
 - **Latency:** most calls take 0.8 to 2.2 seconds, but DELETE and a 422 validation each took about 11 seconds, and in one run a 422 create and a `GET /ssh-keys/zzz` hung past 60 seconds (not reproducible on retry). **(verified)** Keep a timeout of 60 seconds, and expect GET retries on transport errors to matter.
 - **Pagination:** lists return `{"data":[...],"next_cursor":...}`. Pass `next_cursor` back as `cursor` until it is `null`. Default `limit` is 50, maximum 100 (docs). **(verified for ssh-keys: `next_cursor` is always `null`, the full list is returned, and `limit` is ignored. Other lists unverified.)** Always follow the cursor anyway.
-- **Timestamps and IDs:** RFC 3339 UTC. IDs are prefixed (`sshk_`, `vm_`, `vol_`, `snap_`, `op_`). `created_at` has variable fractional-second precision (6 to 9 digits).
+- **Timestamps and IDs:** RFC 3339 UTC. IDs are prefixed (`sshk_`, `vm_`, `vol_`, `snap_`, `op_`). `created_at` has different precision on create (9 digits) and on GET (6 digits, zeros trimmed) for the same key, so the provider stores it truncated to whole seconds. Found by an acceptance test.
 - **Async behavior:** **(unverified, not yet tested)** creating an instance returns an order, polled with `GET /instance-orders/{order_id}`. Other long operations are polled with `GET /operations/{operation_id}`. Terminal states are not yet documented. Test with a throwaway resource and fill this in before building `instance`.
 
 | Resource | Create | Read | List | Delete | Notes |
@@ -182,6 +182,14 @@ Paths above are relative to the base URL.
 - Name constraints are undocumented (a name with spaces and `!!` was not rejected on its own). Do not add a name validator until the rule is known. Ask the backend owners.
 - Create and delete are not idempotent-replayed (see Idempotency above). On a lost create response, list keys and match on `fingerprint` before concluding it failed.
 - Backend IDs are prefixed (`sshk_`, `key_`, ...). Validate the prefix in import, so a wrong id fails at plan time.
+
+**catalog (plans, images, regions)** **(verified 2026-10-03 against dev, GET only; the OpenAPI spec is wrong on images)**
+- `GET /plans?placement=standard|vpc` returns `{"data":[{id, slug, name, vcpu, memory_mb, disk_gb, price:{currency, monthly_estimate_minor, storage_floor_minor, initial_payment_minor}|null, unpriced_reason}],"next_cursor":null}`. `placement` defaults to `standard`. A standard plan costs more than the same plan for a `vpc` (it includes a public IP), and a bad value returns `400 INVALID_FILTER`.
+- `GET /images` returns `{"data":[{id, slug, name, version, zones:[...]}],"next_cursor":null}`. The spec says `zone_ids` (nullable) and `thumbnail_url`. The live API sends `zones` and no thumbnail.
+- `GET /regions` returns `{"data":[{code, name, placements:[{kind:"standard"|"vpc", zone, available, unavailable_reason}]}],"next_cursor":null}`. A placement kind a region does not offer is absent. `available` is per account (spec reasons: `ACCOUNT_NOT_READY`, `IP_POOL_EXHAUSTED`).
+- All three need a valid key (401 without), ignore `limit` and `cursor`, and always return `next_cursor: null` with the full list. The client makes one request and fails loudly if a cursor ever appears.
+- Prices are estimates from a display-only cache, in the account's currency, in minor units. Do not treat them as quotes.
+- `GET /zones` is not part of the public API (it timed out). Do not use it.
 
 ## Build order
 

@@ -58,11 +58,14 @@ func fromAPIResponse(prev model, k *client.SSHKey) model {
 	return m
 }
 
+// createdAtValue formats the timestamp to whole seconds. The backend returns
+// more digits on create (nanoseconds) than on later reads (microseconds) for
+// the same key, so any finer format would make state flip between two values.
 func createdAtValue(t *time.Time) types.String {
 	if t == nil {
 		return types.StringNull()
 	}
-	return types.StringValue(t.UTC().Format(time.RFC3339Nano))
+	return types.StringValue(t.UTC().Format(time.RFC3339))
 }
 
 // samePublicKey compares the key type and base64 body only. The trailing

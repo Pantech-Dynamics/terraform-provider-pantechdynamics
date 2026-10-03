@@ -6,6 +6,9 @@ import (
 	"os"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -125,7 +128,11 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		images.New,
+		plans.New,
+		regions.New,
+	}
 }
 
 // valueOrEnv prefers an explicit HCL value over the environment variable.
