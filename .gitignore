@@ -1,0 +1,90 @@
+*.dll
+*.exe
+.DS_Store
+example.tf
+terraform.tfplan
+terraform.tfstate
+bin/
+dist/
+modules-dev/
+/pkg/
+website/.vagrant
+website/.bundle
+website/build
+website/node_modules
+.vagrant/
+*.backup
+./*.tfstate
+.terraform/
+*.log
+*.bak
+*~
+.*.swp
+.idea
+*.iml
+*.test
+*.iml
+
+website/vendor
+
+# Test exclusions
+!command/test-fixtures/**/*.tfstate
+!command/test-fixtures/**/.terraform/
+
+# Keep windows files with windows line endings
+*.winfile eol=crlf
+
+# --- Secrets: this provider handles API keys (PAN_...) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+*.auto.tfvars
+*.auto.tfvars.json
+
+# --- Terraform runtime and state ---
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+tfplan
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --- Go build and test output ---
+/bin/
+/dist/
+/terraform-provider-pantechdynamics
+*.exe
+*.dll
+*.test
+*.out
+coverage.*
+cover.out
+go.work
+go.work.sum
+
+# --- Local tooling ---
+.golangci.local.yml
+
+# --- Editors and OS ---
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# --- Claude Code local state ---
+.claude/settings.local.json
