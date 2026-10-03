@@ -1,4 +1,4 @@
-module github.com/pantechdynamics/terraform-provider-pantechdynamics
+module github.com/Pantech-Dynamics/terraform-provider-pantechdynamics
 
 go 1.27.1
 

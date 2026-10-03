@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/pantechdynamics/terraform-provider-pantechdynamics/internal/provider"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/provider"
 )
 
 // version is set by goreleaser at build time.
