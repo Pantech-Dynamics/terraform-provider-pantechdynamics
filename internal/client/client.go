@@ -29,6 +29,9 @@ type Client struct {
 	userAgent string
 	http      *http.Client
 	retry     retryPolicy
+
+	// pollInterval is the pause between operation status checks.
+	pollInterval time.Duration
 }
 
 // Option customises a Client. Options keep New's signature stable as settings
@@ -67,6 +70,8 @@ func New(baseURL, apiKey, version string, opts ...Option) (*Client, error) {
 		userAgent: "terraform-provider-pantechdynamics/" + version,
 		http:      &http.Client{Timeout: defaultTimeout},
 		retry:     defaultRetryPolicy(),
+
+		pollInterval: defaultPollInterval,
 	}
 	for _, opt := range opts {
 		opt(c)

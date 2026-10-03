@@ -40,20 +40,30 @@ func defaultRetryPolicy() retryPolicy {
 // shouldRetry implements the policy:
 //   - 429 is retried for every method: the server rejected the request before
 //     acting on it, so re-sending cannot duplicate anything.
-//   - GET is also retried on 5xx and transport errors, since it changes nothing.
-//   - POST, PUT and DELETE are retried on 5xx and transport errors only when the
-//     call is marked replaySafe. Some endpoints (ssh-key create and delete) do
-//     not replay on an Idempotency-Key, so a blind retry could turn a success
-//     into a 409.
+//   - GET is also retried on any 5xx and on transport errors, since it changes
+//     nothing.
+//   - POST, PUT and DELETE are retried on transport errors and gateway errors
+//     (502, 503, 504) only when the call is marked replaySafe. A plain 500 is
+//     not retried: the backend returns it for deterministic failures such as a
+//     duplicate security group name, where retrying only repeats a slow call.
+//     Endpoints that do not replay on an Idempotency-Key (ssh keys) never opt in.
 func (p retryPolicy) shouldRetry(spec requestSpec, status int, err error) bool {
-	retryUnsafe := spec.method == http.MethodGet || spec.replaySafe
 	if err != nil {
-		return retryUnsafe
+		return spec.method == http.MethodGet || spec.replaySafe
 	}
 	if status == http.StatusTooManyRequests {
 		return true
 	}
-	return retryUnsafe && status >= http.StatusInternalServerError
+	if spec.method == http.MethodGet {
+		return status >= http.StatusInternalServerError
+	}
+	return spec.replaySafe && isGatewayError(status)
+}
+
+// isGatewayError reports the statuses that mean "the request may not have
+// reached the application", as opposed to the application failing.
+func isGatewayError(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
 }
 
 // delay is exponential backoff with jitter, or the server's Retry-After when

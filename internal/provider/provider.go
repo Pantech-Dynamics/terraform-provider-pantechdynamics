@@ -9,6 +9,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/securitygroup"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -122,6 +123,7 @@ func newClient(cfg providerModel, version string) (*client.Client, diag.Diagnost
 // Resources lists the resources this provider offers.
 func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		securitygroup.New,
 		sshkey.New,
 	}
 }
