@@ -82,7 +82,8 @@ The owner is learning while building. Code must be readable by a developer who k
 - Typed request and response structs with JSON tags. No `map[string]any` for known shapes.
 - Map HTTP status to typed errors in one place (404 -> `ErrNotFound`, 401/403 -> auth error, 429 -> rate limited, 4xx -> `APIError` carrying the backend message).
 - Client has a configurable base URL, timeout and user agent (`terraform-provider-pantechdynamics/<version>`).
-- Retries only for safe cases (idempotent GETs, 429, 5xx) with backoff. Never blindly retry POST.
+- Retries (max 3 attempts, backoff with jitter, honours `Retry-After`): GET retries on 429, 5xx and transport errors. Every method retries on 429, because the request was rejected before it ran. POST, PUT and DELETE are NOT retried on 5xx or transport errors by default, because some endpoints (ssh-key create and delete) do not replay on an `Idempotency-Key`. A call opts in with `replaySafe()` only once that endpoint is verified to replay.
+- On an ambiguous create failure (transport error or 5xx), the resource lists and matches before failing, for example by `fingerprint` for ssh keys, and adopts the object if it exists.
 - Async operations: poll a `status` field with a context-aware loop and a timeout. Put the polling helper in one place.
 
 ### Resources
@@ -136,8 +137,8 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 > Items marked **(verified)** were tested against the dev host on 2026-10-03. Items marked **(unverified)** come from the OpenAPI spec or backend code only.
 
 - **Base URL:** the prefix differs per environment, so `base_url` must be a provider setting (default from env var), never hardcoded. **(verified)**
-  - dev: `https://api-dev.pantechdynamics.com/public/v1`
-  - prod: `https://api.pantechdynamics.com/v1`
+  - dev: `https://api-dev.pantechdynamics.com/public/v1` **(verified)**
+  - prod: `https://api.pantechdynamics.com/public/v1` (from the public docs, **unverified**: the dev key is rejected on prod). The public docs at https://docs.pantechdynamics.com/api are the customer-facing reference.
   - A wrong prefix returns `404` with `code: GATEWAY_NO_ROUTE`. That is a configuration error, not a missing resource.
   - Spec file: `cloud/contracts/openapi/control-api.yaml`. Its short-path section ("API key only") is what this provider uses.
 - **Auth:** `Authorization: Bearer PAN_...` (an API key, created by an owner or admin in the console). **(verified)**
@@ -147,18 +148,21 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
   - Never log the key. Mark the provider's `api_key` attribute `Sensitive`.
 - **Idempotency:** every POST, PUT and DELETE requires an `Idempotency-Key` header, or the API returns `400 IDEMPOTENCY_KEY_REQUIRED`. This applies even to DELETE of ids that do not exist. **(verified)**
   - Send a new UUID per logical operation. Reuse the same key only when retrying that same request.
+  - **Exception, ssh-keys: the key is NOT replayed.** Create and delete are documented as "not yet replayed", and verified: re-sending the same key and body after a successful create returned `409 SSH_KEY_NAME_TAKEN`, not the original 201. So a retried ssh-key POST after a lost response yields a 409, not a duplicate and not the original result. Other resources replay normally per the docs (**unverified**).
 - **Error format:** `application/problem+json`. **(verified)**
   ```json
   {"type":"https://api.pantechdynamics.com/problems/resource-not-found","title":"Resource not found","status":404,"code":"RESOURCE_NOT_FOUND","detail":"No resource matches this request.","request_id":"req_..."}
   ```
   - Branch on `code`, not only on `status`. Include `request_id` in error diagnostics so support can find the request.
-  - Codes seen: `RESOURCE_NOT_FOUND` (404), `GATEWAY_NO_ROUTE` (404), `UNAUTHENTICATED` (401), `IDEMPOTENCY_KEY_REQUIRED` (400).
-  - Codes from the spec, not yet seen: `API_KEY_NOT_ALLOWED` (403), `FORBIDDEN` (403), `RATE_LIMITED` (429), 409 for a duplicate ssh key name or fingerprint, 422 validation failures. **(unverified)**
+  - Codes seen: `RESOURCE_NOT_FOUND` (404), `GATEWAY_NO_ROUTE` (404), `UNAUTHENTICATED` (401), `IDEMPOTENCY_KEY_REQUIRED` (400), `SSH_KEY_NAME_TAKEN` (409), `SSH_KEY_ALREADY_EXISTS` (409, same public key under another name), `VALIDATION_FAILED` (422).
+  - 422 carries an `errors` array of `{field, code, message}`, for example `{"field":"public_key","code":"INVALID_SSH_PUBLIC_KEY"}`, `{"field":"name","code":"REQUIRED"}`, `{"field":"bogus","code":"UNKNOWN_FIELD"}`. Unknown JSON fields are rejected. **(verified)** Surface each entry as an attribute diagnostic.
+  - Documented, not yet seen: `INSUFFICIENT_SCOPE`, `FORBIDDEN` (403), `RATE_LIMITED` (429), `IDEMPOTENCY_CONFLICT`, `INVALID_IDEMPOTENCY_KEY`, `ACCOUNT_SUSPENDED`, `CONCURRENT_UPDATE` (409), `INVALID_REQUEST_BODY` (400). **(unverified)**
 - **Not found:** a missing resource returns `404 RESOURCE_NOT_FOUND`. **(verified)** This includes a GET or DELETE of a deleted id, a well-formed id that never existed, and a malformed id.
   - Read: remove from state. Delete: treat as success, because a second DELETE returns 404, not 204.
-- **Rate limit:** 120 requests per minute per key, returning `429` with `Retry-After`. **(unverified, from backend code)** Back off on 429 and avoid parallel refresh storms.
-- **Latency:** typical calls take about 0.5 to 0.9 seconds. One call took about 15 seconds. Use a client timeout of 60 seconds or more. **(verified)**
-- **Pagination:** list endpoints are cursor-based (`next_cursor`). The ssh-key list returns `{"data":[...]}`. **(verified for ssh-keys, unverified for the rest)** Follow the cursor until it is empty.
+- **Rate limit:** dev returned `RateLimit-Limit: 300` per 60s window with `RateLimit-Remaining` and `RateLimit-Reset` on every response. **(verified)** A 429 carries `Retry-After` in seconds (documented, not yet seen). Back off on 429 and avoid parallel refresh storms.
+- **Latency:** most calls take 0.8 to 2.2 seconds, but DELETE and a 422 validation each took about 11 seconds, and in one run a 422 create and a `GET /ssh-keys/zzz` hung past 60 seconds (not reproducible on retry). **(verified)** Keep a timeout of 60 seconds, and expect GET retries on transport errors to matter.
+- **Pagination:** lists return `{"data":[...],"next_cursor":...}`. Pass `next_cursor` back as `cursor` until it is `null`. Default `limit` is 50, maximum 100 (docs). **(verified for ssh-keys: `next_cursor` is always `null`, the full list is returned, and `limit` is ignored. Other lists unverified.)** Always follow the cursor anyway.
+- **Timestamps and IDs:** RFC 3339 UTC. IDs are prefixed (`sshk_`, `vm_`, `vol_`, `snap_`, `op_`). `created_at` has variable fractional-second precision (6 to 9 digits).
 - **Async behavior:** **(unverified, not yet tested)** creating an instance returns an order, polled with `GET /instance-orders/{order_id}`. Other long operations are polled with `GET /operations/{operation_id}`. Terminal states are not yet documented. Test with a throwaway resource and fill this in before building `instance`.
 
 | Resource | Create | Read | List | Delete | Notes |
@@ -167,12 +171,16 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 
 Paths above are relative to the base URL.
 
-**ssh-key details** **(verified)**
-- Create body: `{"name": "...", "public_key": "ssh-ed25519 AAAA..."}`. Returns `201` with `id` (`sshk_...`), `name`, `fingerprint`, `public_key`, `created_at`.
-- `public_key` is optional. If omitted, the backend generates a keypair and the response also carries a one-time `private_key`. It cannot be retrieved again, so it must be saved to state as `Sensitive` at create time.
-- Delete returns `204` with no body.
+**ssh-key details** **(verified 2026-10-03 against dev, using throwaway keys that were deleted afterwards)**
+- Object: `id` (`sshk_...`), `name`, `fingerprint` (`SHA256:...`), `public_key`, `created_at`. There is no `project_id` in the response, although the OpenAPI spec lists one. The spec is wrong here, so trust the live API.
+- Create body: `{"name": "...", "public_key": "ssh-ed25519 AAAA..."}`. Returns `201` with the object above. Both ed25519 and RSA keys were accepted.
+- `public_key` is optional. If omitted, the backend generates an RSA keypair and the `201` also carries a one-time `private_key`. It cannot be retrieved again, so it must be saved to state as `Sensitive` at create time. Never log it.
+- `GET /ssh-keys/{id}` exists (the OpenAPI short-path section omits it, the public docs list it). Unknown and malformed ids both return `404 RESOURCE_NOT_FOUND`.
+- Delete returns `204` with no body. A second delete returns `404 RESOURCE_NOT_FOUND`, which Delete must treat as success.
 - There is no update endpoint, so `name` and `public_key` use `RequiresReplace`.
-- A name or fingerprint already registered returns `409`. **(unverified)**
+- Uniqueness: a duplicate name returns `409 SSH_KEY_NAME_TAKEN`, and an already registered public key returns `409 SSH_KEY_ALREADY_EXISTS`. Both are per account.
+- Name constraints are undocumented (a name with spaces and `!!` was not rejected on its own). Do not add a name validator until the rule is known. Ask the backend owners.
+- Create and delete are not idempotent-replayed (see Idempotency above). On a lost create response, list keys and match on `fingerprint` before concluding it failed.
 - Backend IDs are prefixed (`sshk_`, `key_`, ...). Validate the prefix in import, so a wrong id fails at plan time.
 
 ## Build order
