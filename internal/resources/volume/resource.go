@@ -43,6 +43,7 @@ type volumeAPI interface {
 	DetachVolume(ctx context.Context, id string) (*client.OperationReference, error)
 	DeleteVolume(ctx context.Context, id string) (*client.OperationReference, error)
 	ListDiskOfferings(ctx context.Context) ([]client.DiskOffering, error)
+	RestoreSnapshot(ctx context.Context, id, name, diskOfferingSlug string, sizeGB int64) (*client.OperationReference, error)
 	WaitForOperation(ctx context.Context, id string, done client.DoneCheck) error
 	WaitUntil(ctx context.Context, what string, done client.DoneCheck) error
 }
@@ -108,6 +109,16 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Description: "Id of the instance the volume is attached to, from pantechdynamics_instance. The instance must be running and in the volume's zone. Setting it attaches the volume, changing it moves the volume, and removing it detaches the volume. Unmount the disk inside the instance before detaching, or the data may be damaged. Null means not attached. Destroying the volume detaches it first.",
 				Optional:    true,
 				Validators:  []validator.String{instanceIDCheck},
+			},
+			"source_snapshot_id": schema.StringAttribute{
+				Description: "Id of a snapshot to create the volume from, from pantechdynamics_snapshot. The volume gets the snapshot's data, and its size must be at least the snapshot's. Changing it replaces the volume. Restoring a snapshot to a volume failed on the staging platform, even from a completed snapshot, so this is untested against a working platform.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
+				Validators: []validator.String{snapshotIDCheck},
 			},
 			"mount_point": schema.StringAttribute{
 				Description:   "An absolute path such as /data, stored with the volume as a label. The platform does not mount anything. Changing it replaces the volume.",
@@ -219,7 +230,7 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
-	order, err := placeVolume(ctx, r.api, toCreateRequest(plan))
+	order, err := placeVolume(ctx, r.api, toCreateRequest(plan), knownString(plan.SourceSnapshotID))
 	if err != nil {
 		addAPIError(&resp.Diagnostics, "Error creating volume", err)
 		return
@@ -234,6 +245,10 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 	if err != nil {
 		addWaitError(&resp.Diagnostics, "Error creating volume", id, err)
+		if knownString(plan.SourceSnapshotID) != "" {
+			resp.Diagnostics.AddWarning("Restoring from a snapshot failed", restoreHint)
+		}
+		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 		return
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
@@ -247,6 +262,9 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 }
+
+// restoreHint explains what staging showed about restoring a snapshot.
+const restoreHint = "On the staging platform every restore of a snapshot to a volume failed, even from a completed snapshot, and left a volume in the failed state. That volume exists and can be deleted. If the snapshot is complete and the offering is at least as big as the snapshot, this may be a platform problem."
 
 // modelFromState reads the model back from state, ignoring errors: it is only used to
 // word an error message.

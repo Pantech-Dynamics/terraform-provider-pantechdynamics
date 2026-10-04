@@ -31,8 +31,12 @@ func TestFromAPIResponse(t *testing.T) {
 	v.AttachedInstanceID = ptr("vm_1")
 	v.DesiredInstanceID = ptr("vm_1")
 	v.MountPoint = ptr("/data")
+	v.SourceSnapshotID = ptr("snap_9")
 
 	m := fromAPIResponse(model{}, &v)
+	if m.SourceSnapshotID.ValueString() != "snap_9" {
+		t.Fatalf("source_snapshot_id = %v", m.SourceSnapshotID)
+	}
 
 	if m.ID.ValueString() != "vol_1" || m.SizeGB.ValueInt64() != 5 || m.StorageType.ValueString() != "shared" || m.Zone.ValueString() != "af-abj-1" ||
 		m.MonthlyCostMinor.ValueInt64() != 116800 || m.Currency.ValueString() != "NGN" || m.MountPoint.ValueString() != "/data" {
@@ -73,7 +77,7 @@ func TestFromAPIResponseWithoutCostOrOptionals(t *testing.T) {
 func TestPendingModelHasNoUnknownValues(t *testing.T) {
 	plan := model{
 		ID: types.StringUnknown(), Name: types.StringValue("data"), DiskOfferingSlug: types.StringValue("small-5gb"), SizeGB: types.Int64Unknown(),
-		Region: types.StringUnknown(), InstanceID: types.StringValue("vm_1"), MountPoint: types.StringUnknown(),
+		Region: types.StringUnknown(), InstanceID: types.StringValue("vm_1"), MountPoint: types.StringUnknown(), SourceSnapshotID: types.StringUnknown(),
 		StorageType: types.StringUnknown(), Zone: types.StringUnknown(), ObservedState: types.StringUnknown(),
 		MonthlyCostMinor: types.Int64Unknown(), Currency: types.StringUnknown(), CreatedAt: types.StringUnknown(), UpdatedAt: types.StringUnknown(),
 	}
@@ -81,7 +85,7 @@ func TestPendingModelHasNoUnknownValues(t *testing.T) {
 	m := pendingModel(plan, "vol_9")
 
 	unknowns := map[string]interface{ IsUnknown() bool }{
-		"id": m.ID, "size_gb": m.SizeGB, "region": m.Region, "mount_point": m.MountPoint, "storage_type": m.StorageType, "zone": m.Zone,
+		"id": m.ID, "size_gb": m.SizeGB, "region": m.Region, "source_snapshot_id": m.SourceSnapshotID, "mount_point": m.MountPoint, "storage_type": m.StorageType, "zone": m.Zone,
 		"observed_state": m.ObservedState, "monthly_cost_minor": m.MonthlyCostMinor, "currency": m.Currency, "created_at": m.CreatedAt, "updated_at": m.UpdatedAt,
 	}
 	for name, v := range unknowns {
