@@ -144,3 +144,31 @@ func TestCatalogGetIsRetriedOn5xx(t *testing.T) {
 		t.Fatalf("err = %v, calls = %d", err, calls)
 	}
 }
+
+func TestListDiskOfferings(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/disk-offerings" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"slug":"custom","name":"Custom","size_gb":null,"custom_size":true,"storage_type":"shared","currency":"NGN","hourly_price_minor":32},
+			{"slug":"small-5gb","name":"Small","size_gb":5,"custom_size":false,"storage_type":"shared","currency":"NGN","hourly_price_minor":160},
+			{"slug":"small-local-20gb","name":"Small (Local)","size_gb":20,"custom_size":false,"storage_type":"local","currency":"NGN","hourly_price_minor":640}
+		],"next_cursor":null}`))
+	})
+
+	offerings, err := c.ListDiskOfferings(context.Background())
+	if err != nil || len(offerings) != 3 {
+		t.Fatalf("offerings = %+v, err = %v", offerings, err)
+	}
+	custom, fixed, local := offerings[0], offerings[1], offerings[2]
+	if !custom.CustomSize || custom.SizeGB != nil {
+		t.Fatalf("custom = %+v: a customized offering has no size of its own", custom)
+	}
+	if fixed.CustomSize || fixed.SizeGB == nil || *fixed.SizeGB != 5 || fixed.StorageType != "shared" || fixed.HourlyPriceMinor != 160 {
+		t.Fatalf("fixed = %+v", fixed)
+	}
+	if local.StorageType != "local" {
+		t.Fatalf("local = %+v", local)
+	}
+}

@@ -66,6 +66,18 @@ type Region struct {
 	Placements []Placement `json:"placements"`
 }
 
+// DiskOffering is a kind of volume a customer can order. A fixed offering has its
+// own SizeGB. A customized one (CustomSize) takes the size from the order.
+type DiskOffering struct {
+	Slug             string `json:"slug"`
+	Name             string `json:"name"`
+	SizeGB           *int64 `json:"size_gb"`
+	CustomSize       bool   `json:"custom_size"`
+	StorageType      string `json:"storage_type"`
+	Currency         string `json:"currency"`
+	HourlyPriceMinor int64  `json:"hourly_price_minor"`
+}
+
 // catalogPage is the envelope shared by the catalog lists.
 type catalogPage[T any] struct {
 	Data       []T     `json:"data"`
@@ -102,6 +114,15 @@ func (c *Client) ListRegions(ctx context.Context) ([]Region, error) {
 		return nil, fmt.Errorf("listing regions: %w", err)
 	}
 	return regions, nil
+}
+
+// ListDiskOfferings returns every disk offering.
+func (c *Client) ListDiskOfferings(ctx context.Context) ([]DiskOffering, error) {
+	offerings, err := getCatalog[DiskOffering](ctx, c, "/disk-offerings")
+	if err != nil {
+		return nil, fmt.Errorf("listing disk offerings: %w", err)
+	}
+	return offerings, nil
 }
 
 // getCatalog fetches one unpaginated catalog list. The generic only removes the

@@ -6,12 +6,14 @@ import (
 	"os"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/securitygroup"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/volume"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -127,12 +129,14 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		instance.New,
 		securitygroup.New,
 		sshkey.New,
+		volume.New,
 	}
 }
 
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		diskofferings.New,
 		images.New,
 		plans.New,
 		regions.New,

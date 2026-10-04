@@ -123,3 +123,24 @@ func TestAccRegionsDataSource(t *testing.T) {
 		},
 	})
 }
+
+func TestAccDiskOfferingsDataSource(t *testing.T) {
+	const addr = "data.pantechdynamics_disk_offerings.all"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { preCheck(t) },
+		ProtoV6ProviderFactories: protoV6Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `data "pantechdynamics_disk_offerings" "all" {}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "id", "disk_offerings"),
+					checkListHasValue(addr, "disk_offerings", "slug", "small-5gb"),
+					checkListHasValue(addr, "disk_offerings", "slug", "small-local-20gb"),
+					checkListHasValue(addr, "disk_offerings", "storage_type", "local"),
+					checkListHasValue(addr, "disk_offerings", "custom_size", "true"),
+				),
+			},
+		},
+	})
+}
