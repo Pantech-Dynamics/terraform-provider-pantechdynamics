@@ -1,0 +1,1 @@
+terraform import pantechdynamics_subnet.web snet_06ggex09kssjv1bct7zh0bz85w
