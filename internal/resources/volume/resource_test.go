@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -95,7 +96,7 @@ func updatePlan(s schema.Schema, over map[string]tftypes.Value) tfsdk.Plan {
 func createPlan(s schema.Schema, over map[string]tftypes.Value) tfsdk.Plan {
 	set := map[string]tftypes.Value{
 		"id": unknownStr(), "name": str("data"), "disk_offering_slug": str("small-5gb"), "size_gb": unknownNum(),
-		"region": unknownStr(), "storage_type": unknownStr(), "zone": unknownStr(), "observed_state": unknownStr(),
+		"source_snapshot_id": unknownStr(), "region": unknownStr(), "storage_type": unknownStr(), "zone": unknownStr(), "observed_state": unknownStr(),
 		"monthly_cost_minor": unknownNum(), "currency": unknownStr(), "created_at": unknownStr(), "updated_at": unknownStr(),
 	}
 	for k, v := range over {
@@ -332,6 +333,84 @@ func TestCreate(t *testing.T) {
 			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
 		}
 	})
+}
+
+// --- restore from a snapshot ---
+
+func TestCreateFromASnapshot(t *testing.T) {
+	s := testSchema(t)
+	create := func(api *fakeAPI, over map[string]tftypes.Value) resource.CreateResponse {
+		over["source_snapshot_id"] = str("snap_9")
+		resp := resource.CreateResponse{State: emptyState(s)}
+		newTestResource(api).Create(ctx, resource.CreateRequest{Plan: createPlan(s, over)}, &resp)
+		return resp
+	}
+
+	t.Run("restores instead of creating", func(t *testing.T) {
+		api := seeded()
+		resp := create(api, map[string]tftypes.Value{})
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		m := getModel(t, resp.State)
+		if api.restores != 1 || api.creates != 0 || api.lastRestore.snapshotID != "snap_9" || api.lastRestore.offering != "small-5gb" || api.lastRestore.sizeGB != 0 {
+			t.Fatalf("restores = %d, creates = %d, call = %+v", api.restores, api.creates, api.lastRestore)
+		}
+		if m.SourceSnapshotID.ValueString() != "snap_9" || m.ObservedState.ValueString() != "active" || m.SizeGB.ValueInt64() != 5 {
+			t.Fatalf("state = %+v", m)
+		}
+	})
+
+	t.Run("a customized offering passes its size", func(t *testing.T) {
+		api := seeded()
+		resp := create(api, map[string]tftypes.Value{"disk_offering_slug": str("custom"), "size_gb": num(50)})
+		if resp.Diagnostics.HasError() || api.lastRestore.sizeGB != 50 {
+			t.Fatalf("diags = %s, call = %+v", errorText(resp.Diagnostics), api.lastRestore)
+		}
+	})
+
+	t.Run("a duplicate name is still refused before restoring", func(t *testing.T) {
+		api := seeded(volume("vol_7", "data", "small-5gb", 5, "shared"))
+		resp := create(api, map[string]tftypes.Value{})
+		if api.restores != 0 || !strings.Contains(errorText(resp.Diagnostics), "already exists") {
+			t.Fatalf("restores = %d, diags = %s", api.restores, errorText(resp.Diagnostics))
+		}
+	})
+
+	t.Run("a failed restore keeps the failed volume in state, warns, and the volume can be deleted", func(t *testing.T) {
+		api := seeded()
+		api.restoreFails = true
+		resp := create(api, map[string]tftypes.Value{})
+
+		if !strings.Contains(errorText(resp.Diagnostics), "the provider request failed") {
+			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
+		}
+		warned := false
+		for _, d := range resp.Diagnostics.Warnings() {
+			warned = warned || strings.Contains(d.Detail(), "staging platform every restore")
+		}
+		m := getModel(t, resp.State)
+		if !warned || m.ID.ValueString() != "vol_1" || m.ObservedState.ValueString() != "failed" || m.SourceSnapshotID.ValueString() != "snap_9" {
+			t.Fatalf("warned = %v, state = %+v: the failed volume exists, so state must track it", warned, m)
+		}
+
+		// the next apply deletes it
+		var del resource.DeleteResponse
+		newTestResource(api).Delete(ctx, resource.DeleteRequest{State: resp.State}, &del)
+		if del.Diagnostics.HasError() || api.find("vol_1").ObservedState != client.VolumeDeleted {
+			t.Fatalf("diags = %s", errorText(del.Diagnostics))
+		}
+	})
+}
+
+func TestSnapshotIDCheck(t *testing.T) {
+	for value, wantErr := range map[string]bool{"snap_1": false, "vol_1": true, "": true} {
+		var resp validator.StringResponse
+		snapshotIDCheck.ValidateString(ctx, validator.StringRequest{ConfigValue: types.StringValue(value)}, &resp)
+		if resp.Diagnostics.HasError() != wantErr {
+			t.Errorf("%q: diags = %v", value, resp.Diagnostics)
+		}
+	}
 }
 
 // --- read ---
