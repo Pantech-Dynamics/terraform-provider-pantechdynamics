@@ -22,6 +22,7 @@ type model struct {
 	Region          types.String   `tfsdk:"region"`
 	SecurityGroupID types.String   `tfsdk:"security_group_id"`
 	Tags            types.Map      `tfsdk:"tags"`
+	DesiredState    types.String   `tfsdk:"desired_state"`
 	ObservedState   types.String   `tfsdk:"observed_state"`
 	Zone            types.String   `tfsdk:"zone"`
 	PublicIPv4      types.String   `tfsdk:"public_ipv4"`
@@ -82,6 +83,7 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		Region:          types.StringValue(inst.Region),
 		SecurityGroupID: types.StringValue(inst.SecurityGroupID),
 		Tags:            tagValue,
+		DesiredState:    types.StringValue(inst.DesiredState),
 		ObservedState:   types.StringValue(inst.ObservedState),
 		Zone:            types.StringValue(inst.Zone),
 		PublicIPv4:      types.StringPointerValue(inst.PublicIPv4),
@@ -109,6 +111,7 @@ func pendingModel(plan model, id string) model {
 		Region:          nullIfUnknown(plan.Region),
 		SecurityGroupID: nullIfUnknown(plan.SecurityGroupID),
 		Tags:            tags,
+		DesiredState:    nullIfUnknown(plan.DesiredState),
 		ObservedState:   types.StringNull(),
 		Zone:            types.StringNull(),
 		PublicIPv4:      types.StringNull(),

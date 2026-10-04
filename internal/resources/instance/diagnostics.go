@@ -77,3 +77,20 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 		diags.AddError(summary, err.Error())
 	}
 }
+
+// addUpdateError explains the failures of a resize or a security group change
+// that a user can act on. A plan that is not bigger is the common one.
+func addUpdateError(diags *diag.Diagnostics, summary, id string, err error) {
+	if client.HasFieldCode(err, "plan_slug", client.FieldCodePlanNotBigger) {
+		diags.AddAttributeError(path.Root("plan_slug"), "Instances can only be resized to a bigger plan",
+			"The platform refused the resize because the new plan is not bigger than the current one.\n\n"+
+				"To move to a smaller plan, replace the instance with `terraform apply -replace=<address>`. That destroys the instance and its disk.")
+		return
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		addAPIError(diags, summary, err)
+		return
+	}
+	addWaitError(diags, summary, id, err)
+}

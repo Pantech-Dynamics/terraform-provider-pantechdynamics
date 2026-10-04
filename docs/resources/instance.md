@@ -3,12 +3,12 @@
 page_title: "pantechdynamics_instance Resource - pantechdynamics"
 subcategory: ""
 description: |-
-  A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. Only the name can be changed in place. Changing the plan, image, SSH key, region, security group or tags replaces the instance, which destroys its disk.
+  A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. The name, power state, plan (bigger only) and security group can be changed in place, and a plan or security group change restarts the instance. Changing the image, SSH key, region or tags replaces the instance, which destroys its disk.
 ---
 
 # pantechdynamics_instance (Resource)
 
-A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. Only the name can be changed in place. Changing the plan, image, SSH key, region, security group or tags replaces the instance, which destroys its disk.
+A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. The name, power state, plan (bigger only) and security group can be changed in place, and a plan or security group change restarts the instance. Changing the image, SSH key, region or tags replaces the instance, which destroys its disk.
 
 ## Example Usage
 
@@ -36,16 +36,29 @@ resource "pantechdynamics_security_group" "web" {
 resource "pantechdynamics_instance" "web" {
   # The name becomes the hostname. Keep it unique: the API accepts a duplicate
   # name and then fails the order, so the provider refuses it up front.
-  name       = "web-1"
-  plan_slug  = "individual"
+  name = "web-1"
+
+  # Changing the plan to a bigger one resizes the instance in place. It is stopped
+  # and restarted, which takes several minutes, and the disk grows. A smaller plan
+  # is refused: use `terraform apply -replace` for that, which destroys the disk.
+  plan_slug = "individual"
+
   image_slug = "ubuntu-24-04"
 
-  ssh_key_id        = pantechdynamics_ssh_key.admin.id
+  ssh_key_id = pantechdynamics_ssh_key.admin.id
+
+  # Changing the security group updates the instance in place. The platform only
+  # accepts it on a stopped instance, so the instance is stopped, switched, and
+  # started again if it should be running.
   security_group_id = pantechdynamics_security_group.web.id
 
   tags = {
     purpose = "web"
   }
+
+  # "running" (the default) or "stopped". Changing it starts or stops the
+  # instance in place. A stopped instance is billed for storage only.
+  desired_state = "running"
 
   # Provisioning usually takes under a minute, deleting a few minutes.
   timeouts = {
@@ -67,12 +80,13 @@ output "web_address" {
 
 - `image_slug` (String) Operating system image to use, from the pantechdynamics_images data source. Changing it replaces the instance.
 - `name` (String) Name of the instance, which becomes its hostname: 1 to 63 letters, digits or hyphens, not starting or ending with a hyphen. Should be unique, because the API accepts a duplicate name and then fails the order. Can be changed in place.
-- `plan_slug` (String) Plan to use, from the pantechdynamics_plans data source. Changing it replaces the instance.
+- `plan_slug` (String) Plan to use, from the pantechdynamics_plans data source. Changing it to a bigger plan resizes the instance in place: it is stopped, resized, which takes several minutes, and restarted, and the disk grows with the plan. Instances only grow, so a smaller plan is refused. To move to a smaller one, replace the instance with `terraform apply -replace`, which destroys its disk.
 
 ### Optional
 
+- `desired_state` (String) Whether the instance should be "running" or "stopped". Defaults to "running". Changing it starts or stops the instance in place. A stopped instance is billed for storage only. The provider never asks for a state the instance is already in, because the API fails that operation and leaves the instance failed.
 - `region` (String) Region to create the instance in, for example af-abj. Defaults to the platform's default region. Changing it replaces the instance.
-- `security_group_id` (String) Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. Changing it replaces the instance.
+- `security_group_id` (String) Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. Changing it updates the instance in place, but the platform only accepts the change on a stopped instance, so the instance is stopped, switched, and started again if it should be running.
 - `ssh_key_id` (String) Id of the SSH key to install, from pantechdynamics_ssh_key. The API does not report which key an instance was created with, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Changing it replaces the instance.
 - `tags` (Map of String) Free-form key and value labels. Changing them replaces the instance.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))

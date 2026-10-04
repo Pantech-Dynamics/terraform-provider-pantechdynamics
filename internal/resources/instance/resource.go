@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -40,6 +41,10 @@ type instanceAPI interface {
 	GetInstance(ctx context.Context, id string) (*client.Instance, error)
 	ListInstances(ctx context.Context) ([]client.Instance, error)
 	RenameInstance(ctx context.Context, id, name string) (*client.OperationReference, error)
+	StartInstance(ctx context.Context, id string) (*client.OperationReference, error)
+	StopInstance(ctx context.Context, id string) (*client.OperationReference, error)
+	ResizeInstance(ctx context.Context, id, planSlug string) (*client.OperationReference, error)
+	ChangeInstanceSecurityGroup(ctx context.Context, id, securityGroupID string) (*client.OperationReference, error)
 	DeleteInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	WaitForInstanceOrder(ctx context.Context, id string) (*client.InstanceOrder, error)
 	WaitForOperation(ctx context.Context, id string, done client.DoneCheck) error
@@ -70,7 +75,7 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 // Schema describes the attributes.
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. Only the name can be changed in place. Changing the plan, image, SSH key, region, security group or tags replaces the instance, which destroys its disk.",
+		Description: "A virtual machine. Creating one places an order that is paid from account credit or the default card, so it costs money. The name, power state, plan (bigger only) and security group can be changed in place, and a plan or security group change restarts the instance. Changing the image, SSH key, region or tags replaces the instance, which destroys its disk.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the instance, starting with vm_.",
@@ -83,9 +88,8 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:  []validator.String{nameValidator{}},
 			},
 			"plan_slug": schema.StringAttribute{
-				Description:   "Plan to use, from the pantechdynamics_plans data source. Changing it replaces the instance.",
-				Required:      true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Description: "Plan to use, from the pantechdynamics_plans data source. Changing it to a bigger plan resizes the instance in place: it is stopped, resized, which takes several minutes, and restarted, and the disk grows with the plan. Instances only grow, so a smaller plan is refused. To move to a smaller one, replace the instance with `terraform apply -replace`, which destroys its disk.",
+				Required:    true,
 			},
 			"image_slug": schema.StringAttribute{
 				Description:   "Operating system image to use, from the pantechdynamics_images data source. Changing it replaces the instance.",
@@ -111,13 +115,10 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				},
 			},
 			"security_group_id": schema.StringAttribute{
-				Description: "Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. Changing it replaces the instance.",
-				Optional:    true,
-				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplaceIfConfigured(),
-				},
+				Description:   "Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. Changing it updates the instance in place, but the platform only accepts the change on a stopped instance, so the instance is stopped, switched, and started again if it should be running.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"tags": schema.MapAttribute{
 				Description: "Free-form key and value labels. Changing them replaces the instance.",
@@ -128,6 +129,13 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 					mapplanmodifier.UseStateForUnknown(),
 					mapplanmodifier.RequiresReplaceIfConfigured(),
 				},
+			},
+			"desired_state": schema.StringAttribute{
+				Description: "Whether the instance should be \"running\" or \"stopped\". Defaults to \"running\". Changing it starts or stops the instance in place. A stopped instance is billed for storage only. The provider never asks for a state the instance is already in, because the API fails that operation and leaves the instance failed.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(client.InstanceRunning),
+				Validators:  []validator.String{oneOf{allowed: []string{client.InstanceRunning, client.InstanceStopped}}},
 			},
 			"observed_state": schema.StringAttribute{
 				Description: "State of the instance as the platform sees it, for example \"running\".",
@@ -222,6 +230,16 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() || plan.DesiredState.ValueString() != client.InstanceStopped {
+		return
+	}
+
+	// An instance is always created running, so a requested stop comes after.
+	if err := r.applyPower(ctx, id, client.InstanceStopped); err != nil {
+		addWaitError(&resp.Diagnostics, "Error stopping the new instance", id, err)
+		return
+	}
+	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 }
 
 // Read refreshes state from the API. An instance that is gone, or reported as
@@ -249,8 +267,14 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	resp.Diagnostics.Append(resp.State.Set(ctx, next)...)
 }
 
-// Update renames the instance in place. Every other change replaces it, so a
-// rename and the timeouts block are all that can reach here.
+// Update applies the in-place changes: rename, security group, plan and power
+// state. Every other change replaces the instance.
+//
+// The order saves downtime. A security group change needs the instance stopped
+// and a resize needs it running, so a group change leaves it stopped, a resize
+// starts it only because it must, and the last step brings it to the state the
+// configuration asks for. State is refreshed after each step, so a step that
+// succeeded is not lost if a later one fails.
 func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -265,21 +289,66 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	defer cancel()
 
 	id := state.ID.ValueString()
-	if plan.Name.Equal(state.Name) {
+	renamed := !plan.Name.Equal(state.Name)
+	groupChanged := knownString(plan.SecurityGroupID) != "" && !plan.SecurityGroupID.Equal(state.SecurityGroupID)
+	planChanged := !plan.PlanSlug.Equal(state.PlanSlug)
+	powerChanged := !plan.DesiredState.Equal(state.DesiredState)
+
+	if renamed {
+		if !r.rename(ctx, id, plan, &resp.State, &resp.Diagnostics) {
+			return
+		}
+	}
+	if groupChanged {
+		if err := r.changeSecurityGroup(ctx, id, plan.SecurityGroupID.ValueString()); err != nil {
+			addUpdateError(&resp.Diagnostics, "Error changing the security group", id, err)
+			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+			return
+		}
 		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
-		return
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	if planChanged {
+		if err := r.resize(ctx, id, plan.PlanSlug.ValueString()); err != nil {
+			addUpdateError(&resp.Diagnostics, "Error resizing the instance", id, err)
+			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+			return
+		}
+		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
-	ref, err := r.api.RenameInstance(ctx, id, plan.Name.ValueString())
-	if err != nil {
-		addAPIError(&resp.Diagnostics, "Error renaming instance", err)
-		return
-	}
-	if err := r.api.WaitForOperation(ctx, ref.OperationID, r.hasName(id, plan.Name.ValueString())); err != nil {
-		addWaitError(&resp.Diagnostics, "Error renaming instance", id, err)
-		return
+	// A group change or a resize moves the instance, so the power state is checked
+	// again even when the configuration did not change it.
+	if powerChanged || groupChanged || planChanged {
+		if err := r.applyPower(ctx, id, plan.DesiredState.ValueString()); err != nil {
+			addWaitError(&resp.Diagnostics, "Error changing the instance power state", id, err)
+			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+			return
+		}
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+}
+
+// rename renames the instance and saves the result. It reports whether to go on.
+func (r *Resource) rename(ctx context.Context, id string, plan model, state interface {
+	Set(context.Context, any) diag.Diagnostics
+}, diags *diag.Diagnostics) bool {
+	ref, err := r.api.RenameInstance(ctx, id, plan.Name.ValueString())
+	if err != nil {
+		addAPIError(diags, "Error renaming instance", err)
+		return false
+	}
+	if err := r.api.WaitForOperation(ctx, ref.OperationID, r.hasName(id, plan.Name.ValueString())); err != nil {
+		addWaitError(diags, "Error renaming instance", id, err)
+		return false
+	}
+	r.refresh(ctx, plan, id, state, diags)
+	return !diags.HasError()
 }
 
 // Delete removes the instance and waits until it is gone. An instance that never

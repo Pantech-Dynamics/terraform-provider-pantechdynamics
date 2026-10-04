@@ -18,6 +18,13 @@ const (
 	// while a public IP or port forwarding rule still points at a VPC instance.
 	CodeInstanceHasPublicIP     = "INSTANCE_HAS_PUBLIC_IP"
 	CodeInstanceHasPortForwards = "INSTANCE_HAS_PORT_FORWARDS"
+
+	// CodeInstanceMustBeStopped refuses a security group change on a running instance.
+	CodeInstanceMustBeStopped = "INSTANCE_MUST_BE_STOPPED"
+
+	// FieldCodePlanNotBigger is the field error on plan_slug for a resize to the
+	// same or a smaller plan. Instances only grow.
+	FieldCodePlanNotBigger = "PLAN_NOT_BIGGER"
 )
 
 // Instance states reported in ObservedState.
@@ -26,6 +33,12 @@ const (
 	InstanceStopped = "stopped"
 	InstanceFailed  = "failed"
 	InstanceDeleted = "deleted"
+
+	// Transitional states: the instance is between two settled states.
+	InstancePending      = "pending"
+	InstanceProvisioning = "provisioning"
+	InstanceStopping     = "stopping"
+	InstanceDeleting     = "deleting"
 )
 
 // InstanceSpec is the compute capacity pinned to an instance.
@@ -82,6 +95,16 @@ type CreateInstanceRequest struct {
 // renameRequest changes an instance's name.
 type renameRequest struct {
 	Name string `json:"name"`
+}
+
+// resizeRequest asks for a bigger plan.
+type resizeRequest struct {
+	PlanSlug string `json:"plan_slug"`
+}
+
+// securityGroupRequest names the group an instance should use.
+type securityGroupRequest struct {
+	SecurityGroupID string `json:"security_group_id"`
 }
 
 // listInstancesResponse is one page of the instance list.
@@ -148,6 +171,58 @@ func (c *Client) DeleteInstance(ctx context.Context, id string) (*OperationRefer
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodDelete, instancePath(id), nil, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("deleting instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// StartInstance starts a stopped instance and returns the operation to follow.
+// Only call it when the instance is stopped: starting a running instance makes
+// the operation fail and leaves the instance in the failed state. It is retried
+// on gateway errors because the backend replays a start on the same
+// Idempotency-Key, verified on staging.
+func (c *Client) StartInstance(ctx context.Context, id string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/start", nil, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("starting instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// StopInstance stops a running instance and returns the operation to follow.
+// Only call it when the instance is running: stopping a stopped instance makes
+// the operation fail and leaves the instance in the failed state. It is not
+// retried on gateway errors, because replay of a stop is not verified.
+func (c *Client) StopInstance(ctx context.Context, id string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/stop", nil, &ref); err != nil {
+		return nil, fmt.Errorf("stopping instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// ResizeInstance moves a running instance to a bigger plan and returns the
+// operation to follow. The platform stops, resizes and restarts it, which took
+// about 4.5 minutes on staging, and the disk grows with the plan. A plan that is
+// not bigger is refused with the field error PLAN_NOT_BIGGER, and a stopped
+// instance with 409. It is not retried on gateway errors: replay of a resize is
+// not verified.
+func (c *Client) ResizeInstance(ctx context.Context, id, planSlug string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/resize", resizeRequest{PlanSlug: planSlug}, &ref); err != nil {
+		return nil, fmt.Errorf("resizing instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// ChangeInstanceSecurityGroup points a stopped instance at another security group
+// and returns the operation to follow. A running instance is refused with
+// CodeInstanceMustBeStopped, and the new group applies when it starts again. It
+// is retried on gateway errors because the backend replays it on the same
+// Idempotency-Key, verified on staging.
+func (c *Client) ChangeInstanceSecurityGroup(ctx context.Context, id, securityGroupID string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPut, instancePath(id)+"/security-group", securityGroupRequest{SecurityGroupID: securityGroupID}, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("changing the security group of instance %s: %w", id, err)
 	}
 	return &ref, nil
 }

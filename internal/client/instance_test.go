@@ -234,3 +234,192 @@ func TestDeleteInstanceRetriesGatewayErrorWithSameKey(t *testing.T) {
 		t.Fatalf("keys = %v", keys)
 	}
 }
+
+func TestStartAndStopInstance(t *testing.T) {
+	tests := []struct {
+		name   string
+		call   func(*Client) (*OperationReference, error)
+		suffix string
+	}{
+		{"start", func(c *Client) (*OperationReference, error) { return c.StartInstance(context.Background(), "vm_1") }, "/start"},
+		{"stop", func(c *Client) (*OperationReference, error) { return c.StopInstance(context.Background(), "vm_1") }, "/stop"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/instances/vm_1"+tt.suffix {
+					t.Errorf("got %s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Idempotency-Key") == "" {
+					t.Error("missing Idempotency-Key")
+				}
+				if body, _ := io.ReadAll(r.Body); len(body) != 0 {
+					t.Errorf("body = %q, want none", body)
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
+			})
+
+			ref, err := tt.call(c)
+			if err != nil || ref.OperationID != "op_1" {
+				t.Fatalf("ref = %+v, err = %v", ref, err)
+			}
+		})
+	}
+}
+
+// Only start is verified to replay, so only start may be retried.
+func TestStartIsRetriedButStopIsNot(t *testing.T) {
+	tests := []struct {
+		name      string
+		call      func(*Client) error
+		wantCalls int
+	}{
+		{"start retries a gateway error", func(c *Client) error { _, err := c.StartInstance(context.Background(), "vm_1"); return err }, 2},
+		{"stop does not", func(c *Client) error { _, err := c.StopInstance(context.Background(), "vm_1"); return err }, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var keys []string
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				keys = append(keys, r.Header.Get("Idempotency-Key"))
+				if len(keys) == 1 {
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
+			})
+			_ = tt.call(c)
+			if len(keys) != tt.wantCalls || (len(keys) == 2 && keys[0] != keys[1]) {
+				t.Fatalf("keys = %v, want %d calls reusing one key", keys, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestStopInstanceInvalidState(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":409,"code":"INVALID_RESOURCE_STATE","request_id":"req_1"}`))
+	})
+	if _, err := c.StopInstance(context.Background(), "vm_1"); !HasCode(err, CodeInvalidResourceState) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResizeInstance(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/instances/vm_1/resize" || r.Header.Get("Idempotency-Key") == "" {
+			t.Errorf("got %s %s key=%q", r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"))
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"plan_slug":"starter"`) {
+			t.Errorf("body = %s", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
+	})
+
+	ref, err := c.ResizeInstance(context.Background(), "vm_1", "starter")
+	if err != nil || ref.OperationID != "op_1" {
+		t.Fatalf("ref = %+v, err = %v", ref, err)
+	}
+}
+
+func TestResizeInstanceErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		check  func(error) bool
+	}{
+		{"not bigger", 422, `{"status":422,"code":"VALIDATION_FAILED","errors":[{"field":"plan_slug","code":"PLAN_NOT_BIGGER","message":"must be a bigger plan"}]}`,
+			func(e error) bool { return HasFieldCode(e, "plan_slug", FieldCodePlanNotBigger) }},
+		{"unknown plan", 422, `{"status":422,"code":"VALIDATION_FAILED","errors":[{"field":"plan_slug","code":"PLAN_NOT_FOUND","message":"x"}]}`,
+			func(e error) bool {
+				return HasFieldCode(e, "plan_slug", "PLAN_NOT_FOUND") && !HasFieldCode(e, "plan_slug", FieldCodePlanNotBigger)
+			}},
+		{"instance stopped", 409, `{"status":409,"code":"INVALID_RESOURCE_STATE"}`,
+			func(e error) bool { return HasCode(e, CodeInvalidResourceState) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+			_, err := c.ResizeInstance(context.Background(), "vm_1", "starter")
+			if err == nil || !tt.check(err) || calls != 1 {
+				t.Fatalf("err = %v, calls = %d", err, calls)
+			}
+		})
+	}
+}
+
+func TestResizeIsNotRetriedOnGatewayError(t *testing.T) {
+	calls := 0
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	_, _ = c.ResizeInstance(context.Background(), "vm_1", "starter")
+	if calls != 1 {
+		t.Fatalf("calls = %d: resize replay is not verified, so it must not be retried", calls)
+	}
+}
+
+func TestChangeInstanceSecurityGroup(t *testing.T) {
+	var keys []string
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if r.Method != http.MethodPut || r.URL.Path != "/v1/instances/vm_1/security-group" {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"security_group_id":"sg_2"`) {
+			t.Errorf("body = %s", body)
+		}
+		if len(keys) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
+	})
+
+	ref, err := c.ChangeInstanceSecurityGroup(context.Background(), "vm_1", "sg_2")
+
+	if err != nil || ref.OperationID != "op_1" {
+		t.Fatalf("ref = %+v, err = %v", ref, err)
+	}
+	if len(keys) != 2 || keys[0] != keys[1] {
+		t.Fatalf("keys = %v: a gateway error is retried with the same key because replay is verified", keys)
+	}
+}
+
+func TestChangeInstanceSecurityGroupErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		check  func(error) bool
+	}{
+		{"running", 409, `{"status":409,"code":"INSTANCE_MUST_BE_STOPPED"}`, func(e error) bool { return HasCode(e, CodeInstanceMustBeStopped) }},
+		{"unknown group", 422, `{"status":422,"code":"VALIDATION_FAILED","errors":[{"field":"security_group_id","code":"SECURITY_GROUP_NOT_FOUND","message":"x"}]}`,
+			func(e error) bool { return HasFieldCode(e, "security_group_id", "SECURITY_GROUP_NOT_FOUND") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+			if _, err := c.ChangeInstanceSecurityGroup(context.Background(), "vm_1", "sg_2"); err == nil || !tt.check(err) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
