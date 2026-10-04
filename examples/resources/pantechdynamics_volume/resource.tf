@@ -36,3 +36,11 @@ resource "pantechdynamics_volume" "archive" {
 
 # To grow a volume, change the offering (or size_gb) while it is detached. The
 # plan refuses a resize while it is still attached, and a volume never shrinks.
+
+# A volume created from a snapshot. Its size must be at least the snapshot's.
+# Restoring failed on the staging platform, even from a completed snapshot.
+resource "pantechdynamics_volume" "restored" {
+  name               = "data-restored"
+  disk_offering_slug = "small-local-20gb"
+  source_snapshot_id = pantechdynamics_snapshot.data_before_upgrade.id
+}

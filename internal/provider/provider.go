@@ -14,6 +14,8 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/securitygroup"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/snapshot"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/snapshotschedule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/volume"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -171,6 +173,8 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 	return []func() resource.Resource{
 		instance.New,
 		securitygroup.New,
+		snapshot.New,
+		snapshotschedule.New,
 		sshkey.New,
 		volume.New,
 	}
