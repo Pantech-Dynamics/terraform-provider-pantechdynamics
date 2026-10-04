@@ -158,3 +158,30 @@ func TestWaitForOperationReportsLookupFailure(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestWaitUntil(t *testing.T) {
+	t.Run("polls until the check passes", func(t *testing.T) {
+		c, waits := newTestClient(t, func(http.ResponseWriter, *http.Request) {})
+		calls := 0
+		err := c.WaitUntil(context.Background(), "thing", func(context.Context) (bool, error) { calls++; return calls == 3, nil })
+		if err != nil || calls != 3 || len(*waits) != 2 {
+			t.Fatalf("err = %v, calls = %d, waits = %v", err, calls, *waits)
+		}
+	})
+	t.Run("a check error ends the wait", func(t *testing.T) {
+		c, _ := newTestClient(t, func(http.ResponseWriter, *http.Request) {})
+		boom := errors.New("entered failed state")
+		if err := c.WaitUntil(context.Background(), "thing", func(context.Context) (bool, error) { return false, boom }); !errors.Is(err, boom) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("stops when the context ends and names what it waited for", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		c, _ := newTestClient(t, func(http.ResponseWriter, *http.Request) {})
+		c.retry.sleep = func(ctx context.Context, _ time.Duration) error { cancel(); return ctx.Err() }
+		err := c.WaitUntil(ctx, "instance vm_1 to run", func(context.Context) (bool, error) { return false, nil })
+		if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "instance vm_1 to run") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
