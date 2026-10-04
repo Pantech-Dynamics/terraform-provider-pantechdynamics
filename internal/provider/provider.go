@@ -5,7 +5,18 @@ import (
 	"context"
 	"os"
 
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/securitygroup"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/volume"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -63,8 +74,8 @@ func (p *PantechDynamicsProvider) Schema(_ context.Context, _ provider.SchemaReq
 	}
 }
 
-// Configure resolves the provider settings. The API client is built here once
-// it exists, and handed to resources and data sources.
+// Configure builds the API client once and hands it to every resource and data
+// source. Terraform calls it on each run, after the provider block is evaluated.
 func (p *PantechDynamicsProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var cfg providerModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
@@ -72,25 +83,64 @@ func (p *PantechDynamicsProvider) Configure(ctx context.Context, req provider.Co
 		return
 	}
 
+	c, diags := newClient(cfg, p.version)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.ResourceData = c
+	resp.DataSourceData = c
+}
+
+// newClient resolves the settings (HCL first, then environment) and builds the
+// API client. It is separate from Configure so it can be tested without a
+// Terraform run.
+func newClient(cfg providerModel, version string) (*client.Client, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
 	baseURL := valueOrEnv(cfg.BaseURL, envBaseURL)
 	apiKey := valueOrEnv(cfg.APIKey, envAPIKey)
 
 	if baseURL == "" {
-		resp.Diagnostics.AddError("Missing base_url", "Set base_url in the provider block or the "+envBaseURL+" environment variable.")
+		diags.AddAttributeError(path.Root("base_url"), "Missing base_url",
+			"Set base_url in the provider block or the "+envBaseURL+" environment variable.")
 	}
 	if apiKey == "" {
-		resp.Diagnostics.AddError("Missing api_key", "Set api_key in the provider block or the "+envAPIKey+" environment variable.")
+		diags.AddAttributeError(path.Root("api_key"), "Missing api_key",
+			"Set api_key in the provider block or the "+envAPIKey+" environment variable.")
 	}
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	c, err := client.New(baseURL, apiKey, version)
+	if err != nil {
+		// client.New never echoes the API key in its errors.
+		diags.AddAttributeError(path.Root("base_url"), "Invalid provider configuration", err.Error())
+		return nil, diags
+	}
+	return c, diags
 }
 
 // Resources lists the resources this provider offers.
 func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource.Resource {
-	return nil
+	return []func() resource.Resource{
+		instance.New,
+		securitygroup.New,
+		sshkey.New,
+		volume.New,
+	}
 }
 
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		diskofferings.New,
+		images.New,
+		plans.New,
+		regions.New,
+	}
 }
 
 // valueOrEnv prefers an explicit HCL value over the environment variable.

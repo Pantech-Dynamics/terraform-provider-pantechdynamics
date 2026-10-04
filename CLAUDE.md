@@ -70,7 +70,7 @@ The owner is learning while building. Code must be readable by a developer who k
 ## Code standards
 
 ### General
-- Idiomatic, boring Go. Clarity over cleverness. No premature abstraction or generics.
+- Idiomatic, boring Go. Clarity over cleverness. No premature abstraction. No generics, with one exception: a small generic is allowed to remove real duplication across three or more call sites in one package, and must be tested once for all of them (`getCatalog[T]` in `internal/client/catalog.go` is the example).
 - Small functions with one job. If a function needs a comment to explain its sections, split it.
 - Comments explain WHY, not what. Every exported identifier has a doc comment.
 - No global mutable state. No `init()` side effects. Dependencies passed explicitly.
@@ -82,7 +82,8 @@ The owner is learning while building. Code must be readable by a developer who k
 - Typed request and response structs with JSON tags. No `map[string]any` for known shapes.
 - Map HTTP status to typed errors in one place (404 -> `ErrNotFound`, 401/403 -> auth error, 429 -> rate limited, 4xx -> `APIError` carrying the backend message).
 - Client has a configurable base URL, timeout and user agent (`terraform-provider-pantechdynamics/<version>`).
-- Retries only for safe cases (idempotent GETs, 429, 5xx) with backoff. Never blindly retry POST.
+- Retries (max 3 attempts, backoff with jitter, honours `Retry-After`): GET retries on 429, any 5xx and transport errors. Every method retries 429, because the request was rejected before it ran. POST, PUT and DELETE are NOT retried by default, because ssh-key create and delete do not replay on an `Idempotency-Key`. A call opts in with `replaySafe()` only for an endpoint verified to replay, and then it retries transport errors and 502, 503, 504, never a plain 500 (the backend returns 500 for deterministic failures such as a duplicate security group name, and one such call took 45 seconds).
+- On an ambiguous create failure (transport error or 5xx), the resource lists and matches before failing, for example by `fingerprint` for ssh keys, and adopts the object if it exists.
 - Async operations: poll a `status` field with a context-aware loop and a timeout. Put the polling helper in one place.
 
 ### Resources
@@ -106,6 +107,8 @@ The owner is learning while building. Code must be readable by a developer who k
 - **Resources:** acceptance tests with `terraform-plugin-testing` (`resource.Test`). Required cases: create, read-back, update or replace, import, destroy, and drift (resource deleted outside Terraform).
 - Acceptance tests run only with `TF_ACC=1` against the test zone, never against production.
 - A resource is not done until its acceptance tests pass.
+- **Acceptance tests that spend money** (instances, and later volumes and IPs) follow extra rules: every test starts with a `requireAcc(t)` skip, because helpers call the live API before `resource.Test` would skip; a full run orders as few resources as possible (one instance), reusing it across steps; zero-spend checks (plan-time validation, `PlanOnly`, import of a wrong id, a refused duplicate) get their own steps or tests; resources are named `tfacc-*`; a cleanup sweep deletes any left behind; and the run is followed by a listing that confirms nothing remains. Report each paid create. Stop at the first unexpected `402` or charge and ask.
+- Terraform line-wraps long error text, so `ExpectError` patterns use the short diagnostic summary, not a long sentence.
 
 ## Commands
 
@@ -136,8 +139,8 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 > Items marked **(verified)** were tested against the dev host on 2026-10-03. Items marked **(unverified)** come from the OpenAPI spec or backend code only.
 
 - **Base URL:** the prefix differs per environment, so `base_url` must be a provider setting (default from env var), never hardcoded. **(verified)**
-  - dev: `https://api-dev.pantechdynamics.com/public/v1`
-  - prod: `https://api.pantechdynamics.com/v1`
+  - dev: `https://api-dev.pantechdynamics.com/public/v1` **(verified)**
+  - prod: `https://api.pantechdynamics.com/public/v1` (from the public docs, **unverified**: the dev key is rejected on prod). The public docs at https://docs.pantechdynamics.com/api are the customer-facing reference.
   - A wrong prefix returns `404` with `code: GATEWAY_NO_ROUTE`. That is a configuration error, not a missing resource.
   - Spec file: `cloud/contracts/openapi/control-api.yaml`. Its short-path section ("API key only") is what this provider uses.
 - **Auth:** `Authorization: Bearer PAN_...` (an API key, created by an owner or admin in the console). **(verified)**
@@ -147,19 +150,25 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
   - Never log the key. Mark the provider's `api_key` attribute `Sensitive`.
 - **Idempotency:** every POST, PUT and DELETE requires an `Idempotency-Key` header, or the API returns `400 IDEMPOTENCY_KEY_REQUIRED`. This applies even to DELETE of ids that do not exist. **(verified)**
   - Send a new UUID per logical operation. Reuse the same key only when retrying that same request.
+  - **Exception, ssh-keys: the key is NOT replayed.** Create and delete are documented as "not yet replayed", and verified: re-sending the same key and body after a successful create returned `409 SSH_KEY_NAME_TAKEN`, not the original 201. So a retried ssh-key POST after a lost response yields a 409, not a duplicate and not the original result. Other resources replay normally per the docs (**unverified**).
 - **Error format:** `application/problem+json`. **(verified)**
   ```json
   {"type":"https://api.pantechdynamics.com/problems/resource-not-found","title":"Resource not found","status":404,"code":"RESOURCE_NOT_FOUND","detail":"No resource matches this request.","request_id":"req_..."}
   ```
   - Branch on `code`, not only on `status`. Include `request_id` in error diagnostics so support can find the request.
-  - Codes seen: `RESOURCE_NOT_FOUND` (404), `GATEWAY_NO_ROUTE` (404), `UNAUTHENTICATED` (401), `IDEMPOTENCY_KEY_REQUIRED` (400).
-  - Codes from the spec, not yet seen: `API_KEY_NOT_ALLOWED` (403), `FORBIDDEN` (403), `RATE_LIMITED` (429), 409 for a duplicate ssh key name or fingerprint, 422 validation failures. **(unverified)**
+  - Codes seen: `RESOURCE_NOT_FOUND` (404), `GATEWAY_NO_ROUTE` (404), `UNAUTHENTICATED` (401), `IDEMPOTENCY_KEY_REQUIRED` (400), `SSH_KEY_NAME_TAKEN` (409), `SSH_KEY_ALREADY_EXISTS` (409, same public key under another name), `VALIDATION_FAILED` (422).
+  - 422 carries an `errors` array of `{field, code, message}`, for example `{"field":"public_key","code":"INVALID_SSH_PUBLIC_KEY"}`, `{"field":"name","code":"REQUIRED"}`, `{"field":"bogus","code":"UNKNOWN_FIELD"}`. Unknown JSON fields are rejected. **(verified)** Surface each entry as an attribute diagnostic.
+  - Documented, not yet seen: `INSUFFICIENT_SCOPE`, `FORBIDDEN` (403), `RATE_LIMITED` (429), `IDEMPOTENCY_CONFLICT`, `INVALID_IDEMPOTENCY_KEY`, `ACCOUNT_SUSPENDED`, `CONCURRENT_UPDATE` (409), `INVALID_REQUEST_BODY` (400). **(unverified)**
 - **Not found:** a missing resource returns `404 RESOURCE_NOT_FOUND`. **(verified)** This includes a GET or DELETE of a deleted id, a well-formed id that never existed, and a malformed id.
   - Read: remove from state. Delete: treat as success, because a second DELETE returns 404, not 204.
-- **Rate limit:** 120 requests per minute per key, returning `429` with `Retry-After`. **(unverified, from backend code)** Back off on 429 and avoid parallel refresh storms.
-- **Latency:** typical calls take about 0.5 to 0.9 seconds. One call took about 15 seconds. Use a client timeout of 60 seconds or more. **(verified)**
-- **Pagination:** list endpoints are cursor-based (`next_cursor`). The ssh-key list returns `{"data":[...]}`. **(verified for ssh-keys, unverified for the rest)** Follow the cursor until it is empty.
-- **Async behavior:** **(unverified, not yet tested)** creating an instance returns an order, polled with `GET /instance-orders/{order_id}`. Other long operations are polled with `GET /operations/{operation_id}`. Terminal states are not yet documented. Test with a throwaway resource and fill this in before building `instance`.
+- **Rate limit:** dev returned `RateLimit-Limit: 300` per 60s window with `RateLimit-Remaining` and `RateLimit-Reset` on every response. **(verified)** A 429 carries `Retry-After` in seconds (documented, not yet seen). Back off on 429 and avoid parallel refresh storms.
+- **Latency:** most calls take 0.8 to 2.2 seconds, but DELETE and a 422 validation each took about 11 seconds, and in one run a 422 create and a `GET /ssh-keys/zzz` hung past 60 seconds (not reproducible on retry). **(verified)** Keep a timeout of 60 seconds, and expect GET retries on transport errors to matter.
+- **Pagination:** lists return `{"data":[...],"next_cursor":...}`. Pass `next_cursor` back as `cursor` until it is `null`. Default `limit` is 50, maximum 100 (docs). **(verified for ssh-keys: `next_cursor` is always `null`, the full list is returned, and `limit` is ignored. Other lists unverified.)** Always follow the cursor anyway.
+- **Timestamps and IDs:** RFC 3339 UTC. IDs are prefixed (`sshk_`, `vm_`, `vol_`, `snap_`, `op_`). `created_at` has different precision on create (9 digits) and on GET (6 digits, zeros trimmed) for the same key, so the provider stores it truncated to whole seconds. Found by an acceptance test.
+- **Async behavior:** writes return `202 {operation_id, resource_id, status}`. `GET /operations/{id}` returns `{id, resource_type, resource_id, kind, status, failure:{code,reason}|null, created_at, updated_at}` with `status` in `submitting | submitted | succeeded | failed`. **(verified for security groups; instances still unverified, see the instance order flow below)**
+  - Create finished in under a second and replace-rules in about 2 seconds, but a **delete operation stayed `submitted` for over an hour** although the group was already gone (`GET` returned 404). The operation is trusted to report failure, not completion: after a delete, finish on the resource being gone. Raise this with the backend team.
+  - Operation and list calls were slow at times: single GETs of 20 to 48 seconds were seen. Poll every 2 seconds, but expect a poll to take long, and keep generous timeouts.
+  - Instance creation returns an order polled with `GET /instance-orders/{order_id}`. **(verified, see the instances section below)**
 
 | Resource | Create | Read | List | Delete | Notes |
 |---|---|---|---|---|---|
@@ -167,22 +176,79 @@ Local manual testing: build the binary and point `~/.terraformrc` `dev_overrides
 
 Paths above are relative to the base URL.
 
-**ssh-key details** **(verified)**
-- Create body: `{"name": "...", "public_key": "ssh-ed25519 AAAA..."}`. Returns `201` with `id` (`sshk_...`), `name`, `fingerprint`, `public_key`, `created_at`.
-- `public_key` is optional. If omitted, the backend generates a keypair and the response also carries a one-time `private_key`. It cannot be retrieved again, so it must be saved to state as `Sensitive` at create time.
-- Delete returns `204` with no body.
+**ssh-key details** **(verified 2026-10-03 against dev, using throwaway keys that were deleted afterwards)**
+- Object: `id` (`sshk_...`), `name`, `fingerprint` (`SHA256:...`), `public_key`, `created_at`. There is no `project_id` in the response, although the OpenAPI spec lists one. The spec is wrong here, so trust the live API.
+- Create body: `{"name": "...", "public_key": "ssh-ed25519 AAAA..."}`. Returns `201` with the object above. Both ed25519 and RSA keys were accepted.
+- `public_key` is optional. If omitted, the backend generates an RSA keypair and the `201` also carries a one-time `private_key`. It cannot be retrieved again, so it must be saved to state as `Sensitive` at create time. Never log it.
+- `GET /ssh-keys/{id}` exists (the OpenAPI short-path section omits it, the public docs list it). Unknown and malformed ids both return `404 RESOURCE_NOT_FOUND`.
+- Delete returns `204` with no body. A second delete returns `404 RESOURCE_NOT_FOUND`, which Delete must treat as success.
 - There is no update endpoint, so `name` and `public_key` use `RequiresReplace`.
-- A name or fingerprint already registered returns `409`. **(unverified)**
+- Uniqueness: a duplicate name returns `409 SSH_KEY_NAME_TAKEN`, and an already registered public key returns `409 SSH_KEY_ALREADY_EXISTS`. Both are per account.
+- Name constraints are undocumented (a name with spaces and `!!` was not rejected on its own). Do not add a name validator until the rule is known. Ask the backend owners.
+- Create and delete are not idempotent-replayed (see Idempotency above). On a lost create response, list keys and match on `fingerprint` before concluding it failed.
 - Backend IDs are prefixed (`sshk_`, `key_`, ...). Validate the prefix in import, so a wrong id fails at plan time.
+
+**catalog (plans, images, regions)** **(verified 2026-10-03 against dev, GET only; the OpenAPI spec is wrong on images)**
+- `GET /plans?placement=standard|vpc` returns `{"data":[{id, slug, name, vcpu, memory_mb, disk_gb, price:{currency, monthly_estimate_minor, storage_floor_minor, initial_payment_minor}|null, unpriced_reason}],"next_cursor":null}`. `placement` defaults to `standard`. A standard plan costs more than the same plan for a `vpc` (it includes a public IP), and a bad value returns `400 INVALID_FILTER`.
+- `GET /images` returns `{"data":[{id, slug, name, version, zones:[...]}],"next_cursor":null}`. The spec says `zone_ids` (nullable) and `thumbnail_url`. The live API sends `zones` and no thumbnail.
+- `GET /regions` returns `{"data":[{code, name, placements:[{kind:"standard"|"vpc", zone, available, unavailable_reason}]}],"next_cursor":null}`. A placement kind a region does not offer is absent. `available` is per account (spec reasons: `ACCOUNT_NOT_READY`, `IP_POOL_EXHAUSTED`).
+- All three need a valid key (401 without), ignore `limit` and `cursor`, and always return `next_cursor: null` with the full list. The client makes one request and fails loudly if a cursor ever appears.
+- Prices are estimates from a display-only cache, in the account's currency, in minor units. Do not treat them as quotes.
+- `GET /zones` is not part of the public API (it timed out). Do not use it.
+
+**security groups and operations** **(verified 2026-10-03 against dev with throwaway `tfprobe-*` groups, all deleted)**
+- Paths: `POST /security-groups`, `GET /security-groups`, `GET /security-groups/{id}`, `PUT /security-groups/{id}/rules`, `DELETE /security-groups/{id}`. The live list is paginated (`limit` honoured, default 50, max 100) and returns `{"data":[...],"next_cursor":...}`. There is no `project_id` in the response, unlike the spec.
+- Object: `{id:"sg_...", name, rules:[{direction, protocol, port_range, cidr}], desired_state:"present", observed_state:"active", created_at, updated_at}`. Rules have no ids. `port_range` is `""` for icmp and for all ports, and must be sent even when empty.
+- `PUT .../rules` replaces the entire set. `[]` is rejected with `422 VALIDATION_FAILED` (no `errors` array), and so is an empty rule list on create: at least one rule is required. The docs say `[]` clears the rules. They are wrong.
+- **Idempotency replay works** for create, PUT and DELETE: re-sending the same key returned the same `operation_id` and `resource_id`. Re-sending with a different body also returned the original instead of a conflict (the docs promise `IDEMPOTENCY_CONFLICT`), so never rely on a conflict to catch a reused key.
+- A GET right after create is consistent with the create call, and a deleted group returns `404 RESOURCE_NOT_FOUND`. A second DELETE of a gone group returns `202` with a **new** operation, not 404, so delete is idempotent.
+- **Backend bugs to report:** a duplicate name returns `500 INTERNAL` after about 45 seconds (not 409), and a 300-character name returns `500 INTERNAL` (the spec says max 255). Both are deterministic. Check duplicates by listing before create, and validate the name length at plan time.
+- **A deleted group's name stays reserved.** Creating a group with the name of one deleted minutes earlier returns `500 INTERNAL` (a deleted group already returns 404, and the list does not show it). It was still refused about 5 minutes after the delete. So a name cannot be reused soon after a delete, and the provider can only add a hint to the error. A rename replaces the group under a new name, so it is unaffected. Raise this with the backend team.
+- Delete is refused with `409 INVALID_RESOURCE_STATE` while an instance uses the group, and the `default` group returns `409 DEFAULT_SECURITY_GROUP_UNDELETABLE` (both documented, not exercised). Invalid direction, port or cidr return `422 VALIDATION_FAILED`.
+- The `default` group exists on every account with one ingress icmp rule. VPC subnet firewall rules (`/subnets/{id}/firewall-rules`) are a separate, VPC-only feature and are not part of `pantechdynamics_security_group`.
+
+**instances and orders** **(verified 2026-10-03 against dev. This spent real credit: 2 orders of NGN 15,040 each on the `individual` plan. One produced an instance, one failed, and both were cleaned up.)**
+- **Money:** `POST /instances` reserves credit or charges the default card upfront. With no card and too little credit it returns `402 INSUFFICIENT_CREDIT` whose detail states the amount required and available (for example "needs NGN 15,040.00 of credit upfront and NGN 1,000.00 is available"). That check runs **before** the region, security group, ssh key and long-name validation, so those cannot be probed without credit. An `individual` instance needs NGN 15,040 (`amount_minor` 1504000).
+- **Create replays on the same `Idempotency-Key`**: re-sending the same key and body returned the identical `order_id` and `instance_id`, so a retried create cannot double-charge. `CreateInstance` is therefore retried on gateway errors. Delete also replays (same `operation_id`). Rename replay is unverified.
+- **Create response:** `202 {order_id, instance_id, status:"awaiting_payment", operation_id:null, failure_code:null, amount_minor, currency}`. Reading the order back (`GET /instance-orders/{id}`) names the field `id`, not `order_id`, and adds `created_at` and `updated_at`.
+- **Order flow seen:** `awaiting_payment` then `provisioned` (credit path), about 36 seconds in total. Order and instance became `running` within the same second. A failed order has `failure_code`, for example `provisioning_handoff_failed`, and `operation_id` stays null, and the instance never exists (`GET` returns 404).
+- **Live instance shape differs from the spec:** `{id:"vm_...", name, plan_id, plan_slug, image_id, image_slug, region, zone, network_id|null, subnet_id|null, security_group_id, public_ipv4|null, private_ipv4, desired_state, observed_state, spec:{vcpu, memory_mb, disk_gb}, tags, failure|null, created_at, updated_at}`. There is no `generation`, `zone_id`, `public_ip` or `private_ip`. A standard instance showed `public_ipv4: null` and a public-looking address in `private_ipv4` (102.211.122.77). The `failure` object shape is unverified.
+- **Names are not unique**, and a duplicate is not caught at order time: creating a second instance with the same name returned `202` and an order, which then **failed** with `provisioning_handoff_failed` after about 5 seconds. That order reserved NGN 15,040 and it is unknown whether it was refunded. So the provider must check for an existing instance with the same name **before** ordering. The list supports `q` (name substring).
+- **Rename** (`POST /instances/{id}/rename {"name"}`) returns `202` with an operation that finishes in seconds. It validates only that the name is present (an empty name gives `422 REQUIRED`). It accepted uppercase, spaces and a 64-character name, and one call with an underscore hung for 120 seconds. The docs say the name becomes the hostname, 1 to 63 characters, so the provider validates that at plan time even though the backend does not.
+- **Delete** (`DELETE /instances/{id}`) returns `202` with an operation. The instance went `deleting` and was `deleted` about 2.5 minutes later, with the operation `succeeded`. **A deleted instance is still readable: `GET` returns `200` with `observed_state: "deleted"` and `desired_state: "deleted"`, not 404.** It disappears from the list. A second delete returns `202` with a new operation. Deleting an id that never existed returns `404`. So Read and the delete wait must treat `observed_state = deleted` as gone, as well as 404.
+- **Slowness:** several POSTs took 48 to 61 seconds, and a few hung past 120 seconds. Keep generous timeouts and never assume a hung call did nothing: list before concluding.
+- **Power state (stop, start, reboot), probed on one instance 2026-10-04:** `POST /instances/{id}/stop`, `/start` and `/reboot` take no body and need an `Idempotency-Key`. Each returns `202` with an operation. `desired_state` changes immediately, and `observed_state` follows. A real stop and a real start each finished within seconds (operation `succeeded` in about 1 second). **Start replays on the same key** (same `operation_id`). Stop replay was inconclusive (the replay call timed out).
+  - **A redundant stop or start fails.** Stopping an already stopped instance, and starting an already running one, each returned `202` and then the operation **failed** after about 60 seconds, leaving `observed_state: "failed"`. The failure was `{"code":"PROVISIONING_RETRIES_EXHAUSTED","reason":"..."}`. So never send an action when the instance is already in the target state.
+  - **Recovery from `failed` is not reliable.** A START brought a failed, stopped instance back to `running`. A STOP on a failed instance whose desired state was `running` failed again with `invalid instance state transition`. `REBOOT` on a failed instance returns `409 INVALID_RESOURCE_STATE`. Delete works on a failed instance (about 2 minutes).
+  - **The `failure` object is `{code, reason}`** and the `reason` can leak internal provider text, for example `PROVISIONING_REQUEST_FAILED: the provider request failed`. Show it to the user but do not build logic on its text.
+  - **Create state sequence:** `pending`, then `provisioning`, then `running`, with `desired_state: running` throughout. The `private_ipv4` is reused across instances (102.211.122.77 appeared on two).
+- **Security group change and resize, probed on one instance 2026-10-04:**
+  - **Security group change** is `PUT /instances/{id}/security-group {"security_group_id"}` and returns `202` with an operation. The instance must be **stopped**, or it returns `409 INSTANCE_MUST_BE_STOPPED`. A bad group id returns `422` with `errors[].field = security_group_id` and code `SECURITY_GROUP_NOT_FOUND`. It **replays** on the same key (same `operation_id`). The operation finished in 4 to 8 seconds and the instance showed the new group straight away while still stopped. Stop and start each took about 50 seconds through the operation.
+  - **Resize** is `POST /instances/{id}/resize {"plan_slug"}` and returns `202`. The instance must be **running**: resizing a stopped one returns `409 INVALID_RESOURCE_STATE`. The same or a smaller plan returns `422` with `errors[].field = plan_slug` and code `PLAN_NOT_BIGGER`, and an unknown plan returns `PLAN_NOT_FOUND`. A real resize from `individual` to `starter` took about **4.5 minutes**. During it `observed_state` is `provisioning` while `plan_slug` still shows the old plan, then it returns to `running` with the new plan. **The disk grows too** (20 GB to 40 GB, memory 1024 to 2048 MB). Replay of a resize is unverified: a second call made while the first was running returned no operation. No extra charge was visible through the API (`/usage` reports hours only).
+  - "Bigger" is decided by the platform. The plans API gives no rank, so the provider does not guess: it tries the resize and maps `PLAN_NOT_BIGGER` to a clear error on `plan_slug`.
+- Not verified: validation of name characters on create, region and security-group validation, resize, security-group change, and the card-payment path.
+
+**volumes** **(verified 2026-10-04 against staging with cheap `small-5gb` and `small-local-20gb` volumes, and two instances for the attach tests. All deleted.)**
+- Paths: `POST /volumes`, `GET /volumes`, `GET /volumes/{id}`, `POST /volumes/{id}/attach {"instance_id"}`, `POST /volumes/{id}/detach`, `POST /volumes/{id}/resize {"disk_offering_slug", "size_gb"?}`, `DELETE /volumes/{id}`. Disk offerings come from `GET /disk-offerings` (each has `custom_size`, `size_gb`, `storage_type` shared or local, and an hourly price) and `GET /disk-offerings/{slug}/quote`. The cheapest, `small-5gb`, is NGN 160 per hour, NGN 116,800 a month.
+- Object: `{id:"vol_...", name, size_gb, disk_offering_slug, storage_type, region, zone, attached_instance_id|null, attached_instance_name|null, desired_instance_id|null, mount_point|null, source_snapshot_id|null, monthly_cost:{currency, amount_minor}, desired_state:"present", observed_state:"active", created_at, updated_at}`.
+- **Create** takes `name` and `disk_offering_slug` (required), `size_gb`, `region`, `instance_id` and `mount_point`. It returns `202`, and the operation finishes in about 55 seconds. It **replays** on the same key. Validation (all `422` field errors): `name REQUIRED`, `DISK_OFFERING_NOT_FOUND`, `SIZE_REQUIRED` (a customized offering needs `size_gb`), `REGION_NOT_AVAILABLE`, `INVALID_MOUNT_POINT` (must be an absolute path such as `/data`), `UNKNOWN_FIELD`.
+- **A fixed offering silently ignores `size_gb`:** a create with `size_gb: 50` on `small-5gb` was accepted and made a 5 GB volume. **Names are not unique:** a duplicate name was accepted. `mount_point` is stored as a label (the platform does not mount anything).
+- **Delete** returns `202` and the operation finishes in seconds. A deleted volume stays readable with `observed_state: "deleted"` (like instances), disappears from the list, and a repeated delete returns `202`. Delete of an **attached** volume returns `409 INVALID_RESOURCE_STATE`. Delete replay was not tested.
+- **Resize** only works on a **detached** volume and only grows: 5 GB to 10 GB took about 55 seconds. A smaller or equal size returns `409 INVALID_RESOURCE_STATE` (not a field error), and so does resizing an attached volume. Resize replay is unverified.
+- **Attach** needs a running instance in the same zone, takes about 55 seconds, and **replays**. **An attach of a `local` volume succeeded, but every attach of a `shared` volume failed** (operation `failed`, `PROVISIONING_JOB_FAILED`, "the provider reported job failure"), on a fresh instance and after waiting three minutes. Creating a shared volume with `instance_id` also never attached it. Whether a shared volume can ever attach is unknown, and it may be a staging limit.
+- **A failed attach leaves `desired_instance_id` set with `attached_instance_id` null, and that blocks the delete (409)** until a detach is sent. Detach of a volume that is not attached fails its operation after about a minute but is harmless and clears the stale intent, after which delete works. **Detach** otherwise takes about 50 seconds and replays.
+- **The staging catalog has exactly one local offering, `small-local-20gb` (20 GB, NGN 640 per hour).** Every other offering (`custom`, `shared-custom`, `small-5gb`, `shared-10gb`, `medium-20gb`, `shared-50gb`, `large-100gb`, `shared-200gb`) is shared. So a local volume cannot be grown, and only a shared one can be resized.
+- Once, during teardown, a volume delete operation failed (`PROVISIONING_RETRIES_EXHAUSTED: deleting volume: PROVISIONING_REQUEST_FAILED: the provider request failed`) and a poll got a Cloudflare `502` ("origin is overloaded"). The platform was under strain. Treat a failed delete as retryable by the user, and keep sweep code in tests that retries.
+- Not verified: whether shared volumes attach in production, mount behaviour inside the instance, snapshots, and what an attach to a stopped instance returns.
 
 ## Build order
 
-1. Client plus `pantechdynamics_ssh_key` (proves the whole pipeline end to end)
-2. Data sources: `plans`, `images`, `regions`
-3. `pantechdynamics_firewall`
-4. `pantechdynamics_instance` (async, polling)
-5. Volumes, IPs, VPCs
-6. Registry publishing
+1. Client plus `pantechdynamics_ssh_key` (proves the whole pipeline end to end). **Done.**
+2. Data sources: `plans`, `images`, `regions`. **Done.**
+3. `pantechdynamics_security_group`. **Done.** The API calls a firewall for standard instances a security group. VPC subnet firewall rules belong to step 5.
+4. `pantechdynamics_instance` (async, polling, billable). **Done:** create, read, delete, import, and these in-place changes: rename, power state (`desired_state` running or stopped), `plan_slug` (resize, upscale only), and `security_group_id` (stops and restarts the instance). A downgrade is refused by the platform and needs `-replace`. Reboot is not declarative and is left out.
+5. Volumes **(done:** create, read, delete, import, in-place grow while detached, and attach, detach or move through `instance_id`, plus the `pantechdynamics_disk_offerings` data source). **Still to do:** public IPs, VPC networks and subnets, subnet firewall rules, port forwarding, and volume snapshots. All billable, so the spend rules in the Testing section apply.
+6. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
 
 ## Do not
 
