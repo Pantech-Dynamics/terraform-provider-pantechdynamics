@@ -3,7 +3,9 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
@@ -24,8 +26,9 @@ import (
 )
 
 const (
-	envBaseURL = "PANTECHDYNAMICS_BASE_URL"
-	envAPIKey  = "PANTECHDYNAMICS_API_KEY"
+	envBaseURL        = "PANTECHDYNAMICS_BASE_URL"
+	envAPIKey         = "PANTECHDYNAMICS_API_KEY"
+	envRequestTimeout = "PANTECHDYNAMICS_REQUEST_TIMEOUT"
 )
 
 var _ provider.Provider = &PantechDynamicsProvider{}
@@ -39,8 +42,9 @@ type PantechDynamicsProvider struct {
 
 // providerModel maps the provider block in HCL to Go.
 type providerModel struct {
-	BaseURL types.String `tfsdk:"base_url"`
-	APIKey  types.String `tfsdk:"api_key"`
+	BaseURL        types.String `tfsdk:"base_url"`
+	APIKey         types.String `tfsdk:"api_key"`
+	RequestTimeout types.String `tfsdk:"request_timeout"`
 }
 
 // New returns a provider factory, as the framework expects.
@@ -69,6 +73,10 @@ func (p *PantechDynamicsProvider) Schema(_ context.Context, _ provider.SchemaReq
 				Description: "API key (starts with PAN_). Can also be set with the " + envAPIKey + " environment variable.",
 				Optional:    true,
 				Sensitive:   true,
+			},
+			"request_timeout": schema.StringAttribute{
+				Description: "How long a single API request may take before it is abandoned, as a duration such as \"90s\" or \"2m\". Defaults to 60s. Raise it if the API is slow: some calls have taken over a minute. A request that times out is retried where it is safe to, so a call can take up to three times this long. It does not limit how long an apply waits for a resource: that is the timeouts block on each resource. Can also be set with the " + envRequestTimeout + " environment variable.",
+				Optional:    true,
 			},
 		},
 	}
@@ -114,13 +122,48 @@ func newClient(cfg providerModel, version string) (*client.Client, diag.Diagnost
 		return nil, diags
 	}
 
-	c, err := client.New(baseURL, apiKey, version)
+	opts, optDiags := clientOptions(cfg)
+	diags.Append(optDiags...)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	c, err := client.New(baseURL, apiKey, version, opts...)
 	if err != nil {
 		// client.New never echoes the API key in its errors.
 		diags.AddAttributeError(path.Root("base_url"), "Invalid provider configuration", err.Error())
 		return nil, diags
 	}
 	return c, diags
+}
+
+// clientOptions turns the optional settings into client options. An unset
+// request_timeout adds none, so the client keeps its own default.
+func clientOptions(cfg providerModel) ([]client.Option, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	raw := valueOrEnv(cfg.RequestTimeout, envRequestTimeout)
+	if raw == "" {
+		return nil, diags
+	}
+	d, err := parseRequestTimeout(raw)
+	if err != nil {
+		diags.AddAttributeError(path.Root("request_timeout"), "Invalid request_timeout", err.Error())
+		return nil, diags
+	}
+	return []client.Option{client.WithTimeout(d)}, diags
+}
+
+// parseRequestTimeout reads a Go duration such as "90s" or "2m" and requires it
+// to be positive. A bare number such as "90" is refused, because it has no unit.
+func parseRequestTimeout(raw string) (time.Duration, error) {
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a duration. Use a number with a unit, for example \"90s\" or \"2m\"", raw)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%q must be greater than zero", raw)
+	}
+	return d, nil
 }
 
 // Resources lists the resources this provider offers.
@@ -138,8 +181,11 @@ func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() dataso
 	return []func() datasource.DataSource{
 		diskofferings.New,
 		images.New,
+		images.NewSingle,
 		plans.New,
+		plans.NewSingle,
 		regions.New,
+		regions.NewSingle,
 	}
 }
 
