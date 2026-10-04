@@ -21,6 +21,8 @@ type model struct {
 	SSHKeyID        types.String   `tfsdk:"ssh_key_id"`
 	Region          types.String   `tfsdk:"region"`
 	SecurityGroupID types.String   `tfsdk:"security_group_id"`
+	SubnetID        types.String   `tfsdk:"subnet_id"`
+	NetworkID       types.String   `tfsdk:"network_id"`
 	Tags            types.Map      `tfsdk:"tags"`
 	DesiredState    types.String   `tfsdk:"desired_state"`
 	ObservedState   types.String   `tfsdk:"observed_state"`
@@ -42,6 +44,8 @@ func toCreateRequest(ctx context.Context, m model) (client.CreateInstanceRequest
 		SSHKeyID:        knownString(m.SSHKeyID),
 		Region:          knownString(m.Region),
 		SecurityGroupID: knownString(m.SecurityGroupID),
+		SubnetID:        knownString(m.SubnetID),
+		NetworkID:       knownString(m.NetworkID),
 	}
 
 	var diags diag.Diagnostics
@@ -82,6 +86,8 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		SSHKeyID:        sshKey,
 		Region:          types.StringValue(inst.Region),
 		SecurityGroupID: types.StringValue(inst.SecurityGroupID),
+		SubnetID:        types.StringPointerValue(inst.SubnetID),
+		NetworkID:       types.StringPointerValue(inst.NetworkID),
 		Tags:            tagValue,
 		DesiredState:    types.StringValue(inst.DesiredState),
 		ObservedState:   types.StringValue(inst.ObservedState),
@@ -110,6 +116,8 @@ func pendingModel(plan model, id string) model {
 		SSHKeyID:        nullIfUnknown(plan.SSHKeyID),
 		Region:          nullIfUnknown(plan.Region),
 		SecurityGroupID: nullIfUnknown(plan.SecurityGroupID),
+		SubnetID:        nullIfUnknown(plan.SubnetID),
+		NetworkID:       nullIfUnknown(plan.NetworkID),
 		Tags:            tags,
 		DesiredState:    nullIfUnknown(plan.DesiredState),
 		ObservedState:   types.StringNull(),

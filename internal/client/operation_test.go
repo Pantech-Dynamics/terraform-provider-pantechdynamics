@@ -185,3 +185,20 @@ func TestWaitUntil(t *testing.T) {
 		}
 	})
 }
+
+// A done check that reports the operation's own failure must not be wrapped in
+// "checking whether ... reached its goal", which would hide the real cause.
+func TestWaitForOperationPassesAnOperationErrorFromDoneThrough(t *testing.T) {
+	c, _ := newTestClient(t, func(http.ResponseWriter, *http.Request) { t.Error("the operation should not be fetched") })
+	want := &OperationError{Operation: Operation{ID: "op_1", Kind: "create_network", Failure: &OperationFailure{Code: "IP_ADDRESS_UNAVAILABLE"}}}
+
+	err := c.WaitForOperation(context.Background(), "op_1", func(context.Context) (bool, error) { return false, want })
+
+	var got *OperationError
+	if !errors.As(err, &got) || got != want {
+		t.Fatalf("err = %v, want the OperationError itself", err)
+	}
+	if strings.Contains(err.Error(), "reached its goal") {
+		t.Errorf("err = %q, must not be wrapped", err)
+	}
+}

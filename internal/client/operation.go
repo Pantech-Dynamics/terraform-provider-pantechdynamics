@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -105,6 +106,10 @@ func (c *Client) WaitForOperation(ctx context.Context, id string, done DoneCheck
 	return c.pollUntil(ctx, "operation "+id, func(ctx context.Context) (bool, string, error) {
 		if done != nil {
 			reached, err := done(ctx)
+			var opErr *OperationError
+			if errors.As(err, &opErr) {
+				return false, "", err // already says which operation failed and why
+			}
 			if err != nil {
 				return false, "", fmt.Errorf("checking whether operation %s reached its goal: %w", id, err)
 			}
