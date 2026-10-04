@@ -16,12 +16,19 @@ import (
 type fakeAPI struct {
 	instances []client.Instance
 
-	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr error
-	createLands, opStuck, deleteHard                                            bool
+	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr error
+	createLands, opStuck, deleteHard                                                                                    bool
 
 	nextID      int
 	creates     int
 	renames     int
+	starts      int
+	resizes     int
+	groupSwaps  int
+	refused     int // changes sent to an instance in the wrong state, which the platform rejects with 409
+	stops       int
+	redundant   int // actions sent to an instance already in the target state
+	settleTo    string
 	deletes     int
 	orderWaits  int
 	untilWaits  int
@@ -130,6 +137,91 @@ func (f *fakeAPI) DeleteInstance(_ context.Context, id string) (*client.Operatio
 	return &client.OperationReference{OperationID: "op_delete", ResourceID: id}, nil
 }
 
+// StopInstance behaves like the real backend: stopping an instance that is not
+// running fails the operation and leaves the instance failed, which the
+// redundant counter records so a test can prove it never happened.
+func (f *fakeAPI) StopInstance(_ context.Context, id string) (*client.OperationReference, error) {
+	f.stops++
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
+	f.act(id, client.InstanceRunning, client.InstanceStopped)
+	return &client.OperationReference{OperationID: "op_stop", ResourceID: id}, nil
+}
+
+// StartInstance is the mirror of StopInstance.
+func (f *fakeAPI) StartInstance(_ context.Context, id string) (*client.OperationReference, error) {
+	f.starts++
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
+	f.act(id, client.InstanceStopped, client.InstanceRunning)
+	return &client.OperationReference{OperationID: "op_start", ResourceID: id}, nil
+}
+
+// act moves an instance from one settled state to the other, or fails it when it
+// was not in the expected starting state.
+func (f *fakeAPI) act(id, from, to string) {
+	for i := range f.instances {
+		if f.instances[i].ID != id {
+			continue
+		}
+		if f.instances[i].ObservedState != from {
+			f.redundant++
+			f.instances[i].ObservedState = client.InstanceFailed
+			f.instances[i].Failure = &client.InstanceFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "invalid instance state transition"}
+			return
+		}
+		f.instances[i].ObservedState, f.instances[i].DesiredState = to, to
+	}
+}
+
+// planRank orders the plans the way the platform does, smallest first.
+var planRank = map[string]int{"individual": 1, "starter": 2, "developer": 3, "performance": 4, "business": 5}
+
+// ResizeInstance behaves like the real backend: the instance must be running and
+// the plan must be bigger, and a rejected call changes nothing.
+func (f *fakeAPI) ResizeInstance(_ context.Context, id, planSlug string) (*client.OperationReference, error) {
+	f.resizes++
+	if f.resizeErr != nil {
+		return nil, f.resizeErr
+	}
+	for i := range f.instances {
+		if f.instances[i].ID != id {
+			continue
+		}
+		if f.instances[i].ObservedState != client.InstanceRunning {
+			f.refused++
+			return nil, &client.APIError{Status: 409, Code: client.CodeInvalidResourceState}
+		}
+		if planRank[planSlug] <= planRank[f.instances[i].PlanSlug] {
+			return nil, &client.APIError{Status: 422, Code: "VALIDATION_FAILED",
+				Errors: []client.FieldError{{Field: "plan_slug", Code: client.FieldCodePlanNotBigger, Message: "must be a bigger plan"}}}
+		}
+		f.instances[i].PlanSlug = planSlug
+	}
+	return &client.OperationReference{OperationID: "op_resize", ResourceID: id}, nil
+}
+
+// ChangeInstanceSecurityGroup behaves like the real backend: the instance must be stopped.
+func (f *fakeAPI) ChangeInstanceSecurityGroup(_ context.Context, id, securityGroupID string) (*client.OperationReference, error) {
+	f.groupSwaps++
+	if f.groupErr != nil {
+		return nil, f.groupErr
+	}
+	for i := range f.instances {
+		if f.instances[i].ID != id {
+			continue
+		}
+		if f.instances[i].ObservedState != client.InstanceStopped {
+			f.refused++
+			return nil, &client.APIError{Status: 409, Code: client.CodeInstanceMustBeStopped}
+		}
+		f.instances[i].SecurityGroupID = securityGroupID
+	}
+	return &client.OperationReference{OperationID: "op_group", ResourceID: id}, nil
+}
+
 func (f *fakeAPI) WaitForInstanceOrder(_ context.Context, id string) (*client.InstanceOrder, error) {
 	f.orderWaits++
 	if f.orderErr != nil {
@@ -149,6 +241,12 @@ func (f *fakeAPI) WaitUntil(ctx context.Context, _ string, done client.DoneCheck
 	f.untilWaits++
 	if f.untilErr != nil {
 		return f.untilErr
+	}
+	if f.settleTo != "" { // a transition finishes while we wait
+		for i := range f.instances {
+			f.instances[i].ObservedState = f.settleTo
+			f.instances[i].DesiredState = f.settleTo
+		}
 	}
 	return f.settle(ctx, done)
 }

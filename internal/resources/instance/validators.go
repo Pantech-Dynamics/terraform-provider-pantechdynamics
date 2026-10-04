@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -34,5 +36,29 @@ func (nameValidator) ValidateString(_ context.Context, req validator.StringReque
 	if name := req.ConfigValue.ValueString(); !hostnameLabel.MatchString(name) {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid name",
 			fmt.Sprintf("The name becomes the hostname, so it must be 1 to 63 letters, digits or hyphens and cannot start or end with a hyphen, got %q.", name))
+	}
+}
+
+// oneOf rejects a string that is not in a fixed set. It is a few lines, so it
+// lives here rather than adding the framework-validators module.
+type oneOf struct {
+	allowed []string
+}
+
+var _ validator.String = oneOf{}
+
+func (v oneOf) Description(context.Context) string {
+	return "value must be one of: " + strings.Join(v.allowed, ", ")
+}
+
+func (v oneOf) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (v oneOf) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if !slices.Contains(v.allowed, req.ConfigValue.ValueString()) {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid value",
+			fmt.Sprintf("Expected one of %s, got %q.", strings.Join(v.allowed, ", "), req.ConfigValue.ValueString()))
 	}
 }

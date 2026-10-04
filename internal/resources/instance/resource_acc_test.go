@@ -106,23 +106,51 @@ func sshKey(t *testing.T) string {
 	return key.ID
 }
 
-func config(name, keyID, extra string) string {
+// config renders the instance under test on the default plan and security group.
+// desired is "" to leave desired_state out, so its default (running) applies.
+func config(name, keyID, desired, extra string) string {
+	return configWith(name, keyID, desired, "individual", "", extra)
+}
+
+// configWith also sets the plan and, when groupRef is not empty, the security
+// group, for example "pantechdynamics_security_group.alt.id".
+func configWith(name, keyID, desired, planSlug, groupRef, extra string) string {
+	desiredLine, groupLine := "", ""
+	if desired != "" {
+		desiredLine = fmt.Sprintf("desired_state = %q", desired)
+	}
+	if groupRef != "" {
+		groupLine = "security_group_id = " + groupRef
+	}
 	return fmt.Sprintf(`
 resource "pantechdynamics_instance" "test" {
   name       = %q
-  plan_slug  = "individual"
+  plan_slug  = %q
   image_slug = "ubuntu-24-04"
   ssh_key_id = %q
   tags       = { purpose = "tfacc" }
+  %s
+  %s
 
   timeouts = {
     create = "20m"
-    update = "10m"
+    update = "20m"
     delete = "20m"
   }
 }
 %s
-`, name, keyID, extra)
+`, name, planSlug, keyID, desiredLine, groupLine, extra)
+}
+
+// altGroup is a second security group for the group change step. Its name is
+// random, because the platform keeps a deleted group's name reserved.
+func altGroup(name string) string {
+	return fmt.Sprintf(`
+resource "pantechdynamics_security_group" "alt" {
+  name  = %q
+  rules = [{ direction = "ingress", protocol = "icmp", cidr = "0.0.0.0/0" }]
+}
+`, name)
 }
 
 // sweepInstances deletes every live tfacc-vm-* instance. It is the safety net
@@ -212,11 +240,14 @@ func checkSameID(want *string) resource.TestCheckFunc {
 }
 
 // TestAccInstance_lifecycle orders ONE instance (about NGN 15,040) and takes it
-// through create, duplicate-name refusal, import, an in-place rename, and drift.
+// through create, duplicate-name refusal, import, an in-place rename, stop and
+// start, a security group change, a resize to a bigger plan, a refused downgrade,
+// and drift.
 func TestAccInstance_lifecycle(t *testing.T) {
 	requireAcc(t)
 	name := acctest.RandomWithPrefix(namePrefix)
 	renamed := name + "-renamed"
+	groupName := acctest.RandomWithPrefix("tfacc-vm-sg")
 	keyID := sshKey(t)
 	t.Cleanup(func() { sweepInstances(t) })
 	var id string
@@ -227,9 +258,10 @@ func TestAccInstance_lifecycle(t *testing.T) {
 		CheckDestroy:             checkNoneLeft(t),
 		Steps: []resource.TestStep{
 			{
-				Config: config(name, keyID, ""),
+				Config: config(name, keyID, "", ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "name", name),
+					resource.TestCheckResourceAttr(addr, "desired_state", "running"),
 					resource.TestMatchResourceAttr(addr, "id", regexp.MustCompile(`^vm_`)),
 					resource.TestCheckResourceAttr(addr, "observed_state", "running"),
 					resource.TestCheckResourceAttr(addr, "plan_slug", "individual"),
@@ -246,7 +278,7 @@ func TestAccInstance_lifecycle(t *testing.T) {
 				// A second instance with the same name is refused before any order,
 				// so this step spends nothing. depends_on makes it check after the
 				// first one exists.
-				Config: config(name, keyID, fmt.Sprintf(`
+				Config: config(name, keyID, "", fmt.Sprintf(`
 resource "pantechdynamics_instance" "dup" {
   name       = %q
   plan_slug  = "individual"
@@ -265,7 +297,7 @@ resource "pantechdynamics_instance" "dup" {
 			},
 			{
 				// A rename is in place: same id.
-				Config: config(renamed, keyID, ""),
+				Config: config(renamed, keyID, "", ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "name", renamed),
 					checkSameID(&id),
@@ -273,8 +305,69 @@ resource "pantechdynamics_instance" "dup" {
 			},
 			{
 				// A second plan must be empty: no spurious diff.
-				Config:   config(renamed, keyID, ""),
+				Config:   config(renamed, keyID, "", ""),
 				PlanOnly: true,
+			},
+			{
+				// Stop it in place: same id, and the platform reports it stopped.
+				Config: config(renamed, keyID, "stopped", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "desired_state", "stopped"),
+					resource.TestCheckResourceAttr(addr, "observed_state", "stopped"),
+					checkSameID(&id),
+				),
+			},
+			{
+				Config:   config(renamed, keyID, "stopped", ""),
+				PlanOnly: true,
+			},
+			{
+				// Start it again. Leaving desired_state out means running.
+				Config: config(renamed, keyID, "", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "desired_state", "running"),
+					resource.TestCheckResourceAttr(addr, "observed_state", "running"),
+					checkSameID(&id),
+				),
+			},
+			{
+				Config:   config(renamed, keyID, "", ""),
+				PlanOnly: true,
+			},
+			{
+				// Change the security group in place: the instance is stopped, switched
+				// and started again, and keeps its id.
+				Config: configWith(renamed, keyID, "", "individual", "pantechdynamics_security_group.alt.id", altGroup(groupName)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrPair(addr, "security_group_id", "pantechdynamics_security_group.alt", "id"),
+					resource.TestCheckResourceAttr(addr, "desired_state", "running"),
+					resource.TestCheckResourceAttr(addr, "observed_state", "running"),
+					checkSameID(&id),
+				),
+			},
+			{
+				Config:   configWith(renamed, keyID, "", "individual", "pantechdynamics_security_group.alt.id", altGroup(groupName)),
+				PlanOnly: true,
+			},
+			{
+				// Resize to a bigger plan in place. This takes several minutes and the
+				// disk grows with the plan.
+				Config: configWith(renamed, keyID, "", "starter", "pantechdynamics_security_group.alt.id", altGroup(groupName)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "plan_slug", "starter"),
+					resource.TestCheckResourceAttr(addr, "observed_state", "running"),
+					checkSameID(&id),
+				),
+			},
+			{
+				Config:   configWith(renamed, keyID, "", "starter", "pantechdynamics_security_group.alt.id", altGroup(groupName)),
+				PlanOnly: true,
+			},
+			{
+				// A smaller plan is refused by the platform, and the provider says why.
+				// Nothing is changed or charged.
+				Config:      configWith(renamed, keyID, "", "individual", "pantechdynamics_security_group.alt.id", altGroup(groupName)),
+				ExpectError: regexp.MustCompile(`Instances can only be resized`),
 			},
 			{
 				// Delete the instance behind Terraform's back, then refresh: Read must
@@ -313,6 +406,17 @@ resource "pantechdynamics_instance" "test" {
 			{Config: bad("-leading"), ExpectError: regexp.MustCompile(`Invalid name`)},
 			{Config: bad(strings.Repeat("a", 64)), ExpectError: regexp.MustCompile(`Invalid name`)},
 			{
+				Config: `
+resource "pantechdynamics_instance" "test" {
+  name          = "tfacc-vm-state"
+  plan_slug     = "individual"
+  image_slug    = "ubuntu-24-04"
+  desired_state = "deleted"
+}
+`,
+				ExpectError: regexp.MustCompile(`Invalid value`),
+			},
+			{
 				// A valid config, planned only: shows the create and orders nothing.
 				Config:             bad(acctest.RandomWithPrefix(namePrefix)),
 				PlanOnly:           true,
@@ -329,7 +433,7 @@ func TestAccInstance_importRejectsWrongID(t *testing.T) {
 		ProtoV6ProviderFactories: protoV6Factories,
 		Steps: []resource.TestStep{
 			{
-				Config:             config("tfacc-vm-import-check", "sshk_unused", ""),
+				Config:             config("tfacc-vm-import-check", "sshk_unused", "", ""),
 				ResourceName:       addr,
 				ImportState:        true,
 				ImportStateId:      "sg_wrong_prefix",

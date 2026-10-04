@@ -115,3 +115,19 @@ func HasCode(err error, code string) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Code == code
 }
+
+// HasFieldCode reports whether err is a validation failure with an entry for this
+// field and code, for example plan_slug and PLAN_NOT_BIGGER. A 422 carries its
+// specific reasons in the errors list, not in the top-level code.
+func HasFieldCode(err error, field, code string) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	for _, fe := range apiErr.Errors {
+		if fe.Field == field && fe.Code == code {
+			return true
+		}
+	}
+	return false
+}

@@ -21,16 +21,29 @@ resource "pantechdynamics_security_group" "web" {
 resource "pantechdynamics_instance" "web" {
   # The name becomes the hostname. Keep it unique: the API accepts a duplicate
   # name and then fails the order, so the provider refuses it up front.
-  name       = "web-1"
-  plan_slug  = "individual"
+  name = "web-1"
+
+  # Changing the plan to a bigger one resizes the instance in place. It is stopped
+  # and restarted, which takes several minutes, and the disk grows. A smaller plan
+  # is refused: use `terraform apply -replace` for that, which destroys the disk.
+  plan_slug = "individual"
+
   image_slug = "ubuntu-24-04"
 
-  ssh_key_id        = pantechdynamics_ssh_key.admin.id
+  ssh_key_id = pantechdynamics_ssh_key.admin.id
+
+  # Changing the security group updates the instance in place. The platform only
+  # accepts it on a stopped instance, so the instance is stopped, switched, and
+  # started again if it should be running.
   security_group_id = pantechdynamics_security_group.web.id
 
   tags = {
     purpose = "web"
   }
+
+  # "running" (the default) or "stopped". Changing it starts or stops the
+  # instance in place. A stopped instance is billed for storage only.
+  desired_state = "running"
 
   # Provisioning usually takes under a minute, deleting a few minutes.
   timeouts = {

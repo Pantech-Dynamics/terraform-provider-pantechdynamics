@@ -66,7 +66,7 @@ func emptyState(s schema.Schema) tfsdk.State {
 func planFor(s schema.Schema, id, name string, extra map[string]tftypes.Value) tfsdk.Plan {
 	set := map[string]tftypes.Value{
 		"id": unknown(), "name": str(name), "plan_slug": str("individual"), "image_slug": str("ubuntu-24-04"),
-		"region": unknown(), "security_group_id": unknown(), "tags": unknownMap(),
+		"desired_state": str("running"), "region": unknown(), "security_group_id": unknown(), "tags": unknownMap(),
 		"observed_state": unknown(), "zone": unknown(), "public_ipv4": unknown(), "private_ipv4": unknown(),
 		"created_at": unknown(), "updated_at": unknown(),
 	}
@@ -83,7 +83,7 @@ func planFor(s schema.Schema, id, name string, extra map[string]tftypes.Value) t
 func stateFor(s schema.Schema) tfsdk.State {
 	return tfsdk.State{Schema: s, Raw: values(s, map[string]tftypes.Value{
 		"id": str("vm_1"), "name": str("web"), "plan_slug": str("individual"), "image_slug": str("ubuntu-24-04"),
-		"ssh_key_id": str("sshk_1"), "region": str("af-abj"), "security_group_id": str("sg_default"),
+		"ssh_key_id": str("sshk_1"), "desired_state": str("running"), "region": str("af-abj"), "security_group_id": str("sg_default"),
 		"tags":           tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{}),
 		"observed_state": str("running"), "zone": str("af-abj-1"), "private_ipv4": str("102.211.122.77"),
 		"created_at": str("2026-10-03T23:38:52Z"), "updated_at": str("2026-10-03T23:39:25Z"),

@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -66,6 +67,33 @@ func TestAPIErrorIs(t *testing.T) {
 			}
 			if got := errors.Is(tt.err, ErrNoRoute); got != tt.wantNoRoute {
 				t.Errorf("Is(ErrNoRoute) = %v, want %v", got, tt.wantNoRoute)
+			}
+		})
+	}
+}
+
+func TestHasFieldCode(t *testing.T) {
+	err := &APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []FieldError{
+		{Field: "plan_slug", Code: "PLAN_NOT_BIGGER"}, {Field: "name", Code: "REQUIRED"},
+	}}
+	tests := []struct {
+		name        string
+		err         error
+		field, code string
+		want        bool
+	}{
+		{"matches", err, "plan_slug", "PLAN_NOT_BIGGER", true},
+		{"matches a second entry", err, "name", "REQUIRED", true},
+		{"right field, wrong code", err, "plan_slug", "PLAN_NOT_FOUND", false},
+		{"right code, wrong field", err, "name", "PLAN_NOT_BIGGER", false},
+		{"no field errors", &APIError{Status: 409, Code: "X"}, "plan_slug", "PLAN_NOT_BIGGER", false},
+		{"not an api error", errors.New("boom"), "plan_slug", "PLAN_NOT_BIGGER", false},
+		{"wrapped is found", fmt.Errorf("resizing: %w", err), "plan_slug", "PLAN_NOT_BIGGER", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasFieldCode(tt.err, tt.field, tt.code); got != tt.want {
+				t.Fatalf("HasFieldCode = %v, want %v", got, tt.want)
 			}
 		})
 	}
