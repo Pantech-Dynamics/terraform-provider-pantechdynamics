@@ -70,7 +70,7 @@ The owner is learning while building. Code must be readable by a developer who k
 ## Code standards
 
 ### General
-- Idiomatic, boring Go. Clarity over cleverness. No premature abstraction or generics.
+- Idiomatic, boring Go. Clarity over cleverness. No premature abstraction. No generics, with one exception: a small generic is allowed to remove real duplication across three or more call sites in one package, and must be tested once for all of them (`getCatalog[T]` in `internal/client/catalog.go` is the example).
 - Small functions with one job. If a function needs a comment to explain its sections, split it.
 - Comments explain WHY, not what. Every exported identifier has a doc comment.
 - No global mutable state. No `init()` side effects. Dependencies passed explicitly.
@@ -221,12 +221,12 @@ Paths above are relative to the base URL.
 
 ## Build order
 
-1. Client plus `pantechdynamics_ssh_key` (proves the whole pipeline end to end)
-2. Data sources: `plans`, `images`, `regions`
-3. `pantechdynamics_firewall`
-4. `pantechdynamics_instance` (async, polling)
-5. Volumes, IPs, VPCs
-6. Registry publishing
+1. Client plus `pantechdynamics_ssh_key` (proves the whole pipeline end to end). **Done.**
+2. Data sources: `plans`, `images`, `regions`. **Done.**
+3. `pantechdynamics_security_group`. **Done.** The API calls a firewall for standard instances a security group. VPC subnet firewall rules belong to step 5.
+4. `pantechdynamics_instance` (async, polling, billable). **Done** for create, read, rename in place, delete and import. **Still to do:** power state (start and stop), resize (upscale only), and security group change, each as its own design-reviewed change.
+5. Volumes, public IPs, VPC networks and subnets, subnet firewall rules, port forwarding. **Not started.** All billable, so the spend rules in the Testing section apply.
+6. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
 
 ## Do not
 

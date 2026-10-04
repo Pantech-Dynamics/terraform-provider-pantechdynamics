@@ -3,6 +3,7 @@ package securitygroup
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -10,18 +11,43 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 )
 
-// addAPIError reports a client error. A 422 with field errors points at each
-// invalid attribute. Anything else becomes one diagnostic that includes the
+// attributeFor maps a 422 field to a schema attribute. A field inside a rule,
+// such as "rules[0].port_range", points at the rules attribute as a whole. A
+// field the schema does not have returns false, because Terraform rejects a
+// diagnostic on a path that does not exist.
+func attributeFor(field string) (path.Path, bool) {
+	switch {
+	case field == "name":
+		return path.Root("name"), true
+	case field == "rules" || strings.HasPrefix(field, "rules[") || strings.HasPrefix(field, "rules."):
+		return path.Root("rules"), true
+	default:
+		return path.Path{}, false
+	}
+}
+
+// addAPIError reports a client error. A 422 whose fields the schema has points at
+// each invalid attribute. Anything else becomes one diagnostic that includes the
 // request_id.
 func addAPIError(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
-	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 {
+	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 && allMapped(apiErr.Errors) {
 		for _, fe := range apiErr.Errors {
-			diags.AddAttributeError(path.Root(fe.Field), summary, fe.Message+" ("+fe.Code+")")
+			p, _ := attributeFor(fe.Field)
+			diags.AddAttributeError(p, summary, fe.Message+" ("+fe.Code+")")
 		}
 		return
 	}
 	diags.AddError(summary, err.Error())
+}
+
+func allMapped(fields []client.FieldError) bool {
+	for _, fe := range fields {
+		if _, ok := attributeFor(fe.Field); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // addCreateError reports a failed create. The backend answers a name it has

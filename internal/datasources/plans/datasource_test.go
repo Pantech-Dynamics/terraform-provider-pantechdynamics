@@ -34,7 +34,10 @@ func readWith(t *testing.T, api planAPI, placement tftypes.Value) datasource.Rea
 	var sresp datasource.SchemaResponse
 	New().Schema(ctx, datasource.SchemaRequest{}, &sresp)
 	s := sresp.Schema
-	typ := s.Type().TerraformType(ctx).(tftypes.Object)
+	typ, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	if !ok {
+		t.Fatal("the schema type is not an object")
+	}
 
 	vals := map[string]tftypes.Value{}
 	for name, at := range typ.AttributeTypes {
