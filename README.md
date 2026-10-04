@@ -13,6 +13,8 @@ provider "pantechdynamics" {
 
 Both settings can come from the environment: `PANTECHDYNAMICS_BASE_URL` and `PANTECHDYNAMICS_API_KEY`.
 
+An optional `request_timeout` (for example `"90s"`, or `PANTECHDYNAMICS_REQUEST_TIMEOUT`) sets how long one API request may take before it is abandoned. It defaults to 60 seconds. It is separate from the `timeouts` block on each resource, which bounds how long an apply waits for that resource.
+
 ## Development
 
 Requires Go 1.27+.
