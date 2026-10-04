@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type item struct {
@@ -121,5 +123,31 @@ func TestDoNoContent(t *testing.T) {
 	})
 	if err := c.do(context.Background(), http.MethodDelete, "/x", nil, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// WithTimeout must bound each attempt: a server slower than the timeout fails
+// the call, and a longer timeout lets the same server succeed.
+func TestWithTimeoutBoundsEachRequest(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"data":[],"next_cursor":null}`))
+	}))
+	t.Cleanup(slow.Close)
+
+	short, err := New(slow.URL+"/v1", "PAN_test", "test", WithTimeout(50*time.Millisecond), WithMaxAttempts(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := short.ListSSHKeys(context.Background()); err == nil {
+		t.Error("a 50ms timeout against a 300ms server should fail")
+	}
+
+	long, err := New(slow.URL+"/v1", "PAN_test", "test", WithTimeout(5*time.Second), WithMaxAttempts(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := long.ListSSHKeys(context.Background()); err != nil {
+		t.Errorf("a 5s timeout against a 300ms server should succeed: %v", err)
 	}
 }

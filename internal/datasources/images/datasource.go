@@ -48,22 +48,26 @@ func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp 
 				Computed:    true,
 			},
 			"images": schema.ListNestedAttribute{
-				Description: "The available images.",
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id":      schema.StringAttribute{Computed: true, Description: "Identifier of the image."},
-						"slug":    schema.StringAttribute{Computed: true, Description: "Stable short name of the image, used when creating an instance."},
-						"name":    schema.StringAttribute{Computed: true, Description: "Operating system name, for example Ubuntu."},
-						"version": schema.StringAttribute{Computed: true, Description: "Operating system version, for example 24.04 LTS."},
-						"zones": schema.ListAttribute{
-							Computed:    true,
-							ElementType: types.StringType,
-							Description: "Zones the image can be used in.",
-						},
-					},
-				},
+				Description:  "The available images.",
+				Computed:     true,
+				NestedObject: schema.NestedAttributeObject{Attributes: imageAttributes()},
 			},
+		},
+	}
+}
+
+// imageAttributes describes one image. The list and the single-image data source
+// share it, so an image reads the same in both.
+func imageAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"id":      schema.StringAttribute{Computed: true, Description: "Identifier of the image."},
+		"slug":    schema.StringAttribute{Computed: true, Description: "Stable short name of the image, used when creating an instance."},
+		"name":    schema.StringAttribute{Computed: true, Description: "Operating system name, for example Ubuntu."},
+		"version": schema.StringAttribute{Computed: true, Description: "Operating system version, for example 24.04 LTS."},
+		"zones": schema.ListAttribute{
+			Computed:    true,
+			ElementType: types.StringType,
+			Description: "Zones the image can be used in.",
 		},
 	}
 }

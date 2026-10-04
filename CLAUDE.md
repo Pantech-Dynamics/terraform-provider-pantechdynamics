@@ -81,7 +81,7 @@ The owner is learning while building. Code must be readable by a developer who k
 ### Client
 - Typed request and response structs with JSON tags. No `map[string]any` for known shapes.
 - Map HTTP status to typed errors in one place (404 -> `ErrNotFound`, 401/403 -> auth error, 429 -> rate limited, 4xx -> `APIError` carrying the backend message).
-- Client has a configurable base URL, timeout and user agent (`terraform-provider-pantechdynamics/<version>`).
+- Client has a configurable base URL, timeout and user agent (`terraform-provider-pantechdynamics/<version>`). The timeout is the provider's `request_timeout` setting (a Go duration such as `90s`, or `PANTECHDYNAMICS_REQUEST_TIMEOUT`), default 60s, and it bounds each attempt, so a retried call can take up to three times as long. It is not the resource `timeouts` blocks, which bound how long an apply waits.
 - Retries (max 3 attempts, backoff with jitter, honours `Retry-After`): GET retries on 429, any 5xx and transport errors. Every method retries 429, because the request was rejected before it ran. POST, PUT and DELETE are NOT retried by default, because ssh-key create and delete do not replay on an `Idempotency-Key`. A call opts in with `replaySafe()` only for an endpoint verified to replay, and then it retries transport errors and 502, 503, 504, never a plain 500 (the backend returns 500 for deterministic failures such as a duplicate security group name, and one such call took 45 seconds).
 - On an ambiguous create failure (transport error or 5xx), the resource lists and matches before failing, for example by `fingerprint` for ssh keys, and adopts the object if it exists.
 - Async operations: poll a `status` field with a context-aware loop and a timeout. Put the polling helper in one place.
@@ -99,6 +99,7 @@ The owner is learning while building. Code must be readable by a developer who k
 
 ### Naming
 - Resources: `pantechdynamics_<noun>` singular, snake_case (`pantechdynamics_ssh_key`, `pantechdynamics_instance`).
+- Data sources: the plural lists everything (`pantechdynamics_plans`), and the singular looks one item up by its slug or code and fails with the valid values listed (`pantechdynamics_plan`, `_image`, `_region`). Both live in one package and share their attribute descriptions.
 - Attributes match the backend API field names unless the backend naming is bad for users. Flag the mismatch instead of silently renaming.
 
 ## Testing

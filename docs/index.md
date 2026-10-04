@@ -16,6 +16,10 @@ provider "pantechdynamics" {
   # Or set PANTECHDYNAMICS_BASE_URL and PANTECHDYNAMICS_API_KEY.
   base_url = "https://api.pantechdynamics.com/v1"
   api_key  = var.pantechdynamics_api_key
+
+  # Optional. How long one API request may take. Defaults to 60s. Raise it if the
+  # API is slow. Or set PANTECHDYNAMICS_REQUEST_TIMEOUT.
+  # request_timeout = "90s"
 }
 ```
 
@@ -26,3 +30,4 @@ provider "pantechdynamics" {
 
 - `api_key` (String, Sensitive) API key (starts with PAN_). Can also be set with the PANTECHDYNAMICS_API_KEY environment variable.
 - `base_url` (String) Base URL of the Pantech Dynamics API, including the version prefix. Can also be set with the PANTECHDYNAMICS_BASE_URL environment variable.
+- `request_timeout` (String) How long a single API request may take before it is abandoned, as a duration such as "90s" or "2m". Defaults to 60s. Raise it if the API is slow: some calls have taken over a minute. A request that times out is retried where it is safe to, so a call can take up to three times this long. It does not limit how long an apply waits for a resource: that is the timeouts block on each resource. Can also be set with the PANTECHDYNAMICS_REQUEST_TIMEOUT environment variable.
