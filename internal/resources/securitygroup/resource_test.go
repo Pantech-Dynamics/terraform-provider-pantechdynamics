@@ -27,7 +27,11 @@ func testSchema(t *testing.T) schema.Schema {
 func newTestResource(api groupAPI) *Resource { return &Resource{api: api} }
 
 func objectType(s schema.Schema) tftypes.Object {
-	return s.Type().TerraformType(ctx).(tftypes.Object)
+	obj, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	if !ok {
+		panic("the schema type is not an object")
+	}
+	return obj
 }
 
 // values returns an object value with every attribute null except those set.
@@ -49,8 +53,14 @@ func unknown() tftypes.Value { return tftypes.NewValue(tftypes.String, tftypes.U
 
 // rulesValue builds the rules set from (direction, protocol, port, cidr) tuples.
 func rulesValue(s schema.Schema, tuples ...[4]string) tftypes.Value {
-	setType := objectType(s).AttributeTypes["rules"].(tftypes.Set)
-	elemType := setType.ElementType.(tftypes.Object)
+	setType, ok := objectType(s).AttributeTypes["rules"].(tftypes.Set)
+	if !ok {
+		panic("rules is not a set")
+	}
+	elemType, ok := setType.ElementType.(tftypes.Object)
+	if !ok {
+		panic("rules elements are not objects")
+	}
 	elems := make([]tftypes.Value, 0, len(tuples))
 	for _, tp := range tuples {
 		port := tftypes.NewValue(tftypes.String, nil)
@@ -88,9 +98,10 @@ func planFor(s schema.Schema, id, name string, rules ...[4]string) tfsdk.Plan {
 	return tfsdk.Plan{Schema: s, Raw: values(s, set)}
 }
 
-func stateFor(s schema.Schema, id, name string, rules ...[4]string) tfsdk.State {
+// stateFor is the stored state of the group sg_1, named "web", holding the ssh rule.
+func stateFor(s schema.Schema) tfsdk.State {
 	return tfsdk.State{Schema: s, Raw: values(s, map[string]tftypes.Value{
-		"id": str(id), "name": str(name), "rules": rulesValue(s, rules...),
+		"id": str("sg_1"), "name": str("web"), "rules": rulesValue(s, ssh),
 		"observed_state": str("active"), "created_at": str("2026-10-03T22:57:03Z"), "updated_at": str("2026-10-03T22:57:03Z"),
 	})}
 }
@@ -282,8 +293,8 @@ func TestCreate(t *testing.T) {
 func TestRead(t *testing.T) {
 	s := testSchema(t)
 	read := func(api *fakeAPI) resource.ReadResponse {
-		resp := resource.ReadResponse{State: stateFor(s, "sg_1", "web", ssh)}
-		newTestResource(api).Read(ctx, resource.ReadRequest{State: stateFor(s, "sg_1", "web", ssh)}, &resp)
+		resp := resource.ReadResponse{State: stateFor(s)}
+		newTestResource(api).Read(ctx, resource.ReadRequest{State: stateFor(s)}, &resp)
 		return resp
 	}
 
@@ -326,10 +337,10 @@ func TestRead(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	s := testSchema(t)
 	update := func(api *fakeAPI, planRules ...[4]string) resource.UpdateResponse {
-		resp := resource.UpdateResponse{State: stateFor(s, "sg_1", "web", ssh)}
+		resp := resource.UpdateResponse{State: stateFor(s)}
 		newTestResource(api).Update(ctx, resource.UpdateRequest{
 			Plan:  planFor(s, "sg_1", "web", planRules...),
-			State: stateFor(s, "sg_1", "web", ssh),
+			State: stateFor(s),
 		}, &resp)
 		return resp
 	}
@@ -379,7 +390,7 @@ func TestDelete(t *testing.T) {
 	s := testSchema(t)
 	del := func(api *fakeAPI) resource.DeleteResponse {
 		var resp resource.DeleteResponse
-		newTestResource(api).Delete(ctx, resource.DeleteRequest{State: stateFor(s, "sg_1", "web", ssh)}, &resp)
+		newTestResource(api).Delete(ctx, resource.DeleteRequest{State: stateFor(s)}, &resp)
 		return resp
 	}
 

@@ -30,8 +30,12 @@ func newTestResource(api keyAPI) *Resource { return &Resource{api: api} }
 
 func attrValues(s schema.Schema, set map[string]tftypes.Value) tftypes.Value {
 	typ := s.Type().TerraformType(ctx)
+	obj, ok := typ.(tftypes.Object)
+	if !ok {
+		panic("the schema type is not an object")
+	}
 	vals := map[string]tftypes.Value{}
-	for name, at := range typ.(tftypes.Object).AttributeTypes {
+	for name, at := range obj.AttributeTypes {
 		vals[name] = tftypes.NewValue(at, nil)
 	}
 	for k, v := range set {

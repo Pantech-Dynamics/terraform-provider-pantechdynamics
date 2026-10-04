@@ -29,7 +29,13 @@ func testSchema(t *testing.T) schema.Schema {
 
 func newTestResource(api instanceAPI) *Resource { return &Resource{api: api} }
 
-func objectType(s schema.Schema) tftypes.Object { return s.Type().TerraformType(ctx).(tftypes.Object) }
+func objectType(s schema.Schema) tftypes.Object {
+	obj, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	if !ok {
+		panic("the schema type is not an object")
+	}
+	return obj
+}
 
 // values returns an object value with every attribute null except those set.
 func values(s schema.Schema, set map[string]tftypes.Value) tftypes.Value {
@@ -73,9 +79,10 @@ func planFor(s schema.Schema, id, name string, extra map[string]tftypes.Value) t
 	return tfsdk.Plan{Schema: s, Raw: values(s, set)}
 }
 
-func stateFor(s schema.Schema, id, name string) tfsdk.State {
+// stateFor is the stored state of the instance vm_1, named "web".
+func stateFor(s schema.Schema) tfsdk.State {
 	return tfsdk.State{Schema: s, Raw: values(s, map[string]tftypes.Value{
-		"id": str(id), "name": str(name), "plan_slug": str("individual"), "image_slug": str("ubuntu-24-04"),
+		"id": str("vm_1"), "name": str("web"), "plan_slug": str("individual"), "image_slug": str("ubuntu-24-04"),
 		"ssh_key_id": str("sshk_1"), "region": str("af-abj"), "security_group_id": str("sg_default"),
 		"tags":           tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{}),
 		"observed_state": str("running"), "zone": str("af-abj-1"), "private_ipv4": str("102.211.122.77"),
@@ -299,8 +306,8 @@ func (f *failedAfterCreate) GetInstance(ctx context.Context, id string) (*client
 func TestRead(t *testing.T) {
 	s := testSchema(t)
 	read := func(api *fakeAPI) resource.ReadResponse {
-		resp := resource.ReadResponse{State: stateFor(s, "vm_1", "web")}
-		newTestResource(api).Read(ctx, resource.ReadRequest{State: stateFor(s, "vm_1", "web")}, &resp)
+		resp := resource.ReadResponse{State: stateFor(s)}
+		newTestResource(api).Read(ctx, resource.ReadRequest{State: stateFor(s)}, &resp)
 		return resp
 	}
 
@@ -345,10 +352,10 @@ func TestRead(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	s := testSchema(t)
 	update := func(api *fakeAPI, planName string) resource.UpdateResponse {
-		resp := resource.UpdateResponse{State: stateFor(s, "vm_1", "web")}
+		resp := resource.UpdateResponse{State: stateFor(s)}
 		newTestResource(api).Update(ctx, resource.UpdateRequest{
 			Plan:  planFor(s, "vm_1", planName, map[string]tftypes.Value{"ssh_key_id": str("sshk_1")}),
-			State: stateFor(s, "vm_1", "web"),
+			State: stateFor(s),
 		}, &resp)
 		return resp
 	}
@@ -395,7 +402,7 @@ func TestDelete(t *testing.T) {
 	s := testSchema(t)
 	del := func(api *fakeAPI) resource.DeleteResponse {
 		var resp resource.DeleteResponse
-		newTestResource(api).Delete(ctx, resource.DeleteRequest{State: stateFor(s, "vm_1", "web")}, &resp)
+		newTestResource(api).Delete(ctx, resource.DeleteRequest{State: stateFor(s)}, &resp)
 		return resp
 	}
 
