@@ -75,38 +75,64 @@ func (c *Client) GetOperation(ctx context.Context, id string) (*Operation, error
 // operation. WaitForOperation accepts one as a second way to finish.
 type DoneCheck func(ctx context.Context) (bool, error)
 
-// WaitForOperation polls until the operation succeeds, done reports true, the
-// operation fails, or ctx ends. It is the one place polling lives. done may be
-// nil. It exists because the operation record is not always updated: on dev, a
-// security group delete stayed "submitted" for over an hour although the group
-// was long gone. The resource is the authority, and the operation is trusted to
-// report failure. A failed operation is returned as an *OperationError so callers
-// can read the failure code. Callers set the deadline through ctx.
-func (c *Client) WaitForOperation(ctx context.Context, id string, done DoneCheck) error {
+// pollCheck is one look at a resource. It reports whether the wait is over, the
+// status it saw (for error messages), or an error that ends the wait.
+type pollCheck func(ctx context.Context) (done bool, status string, err error)
+
+// pollUntil is the one polling loop. It runs check, and if the wait is not over
+// it sleeps one poll interval, until check ends the wait or ctx does. what names
+// the thing waited for, in error messages.
+func (c *Client) pollUntil(ctx context.Context, what string, check pollCheck) error {
 	for {
+		done, status, err := check(ctx)
+		if err != nil || done {
+			return err
+		}
+		if err := c.retry.sleep(ctx, c.pollInterval); err != nil {
+			return fmt.Errorf("waiting for %s (last status %q): %w", what, status, err)
+		}
+	}
+}
+
+// WaitForOperation polls until the operation succeeds, done reports true, the
+// operation fails, or ctx ends. done may be nil. It exists because the
+// operation record is not always updated: on dev, a security group delete stayed
+// "submitted" for over an hour although the group was long gone. The resource is
+// the authority, and the operation is trusted to report failure. A failed
+// operation is returned as an *OperationError so callers can read the failure
+// code. Callers set the deadline through ctx.
+func (c *Client) WaitForOperation(ctx context.Context, id string, done DoneCheck) error {
+	return c.pollUntil(ctx, "operation "+id, func(ctx context.Context) (bool, string, error) {
 		if done != nil {
 			reached, err := done(ctx)
 			if err != nil {
-				return fmt.Errorf("checking whether operation %s reached its goal: %w", id, err)
+				return false, "", fmt.Errorf("checking whether operation %s reached its goal: %w", id, err)
 			}
 			if reached {
-				return nil
+				return true, "", nil
 			}
 		}
 
 		op, err := c.GetOperation(ctx, id)
 		if err != nil {
-			return err
+			return false, "", err
 		}
 		switch op.Status {
 		case OperationSucceeded:
-			return nil
+			return true, op.Status, nil
 		case OperationFailed:
-			return &OperationError{Operation: *op}
+			return false, op.Status, &OperationError{Operation: *op}
 		}
+		return false, op.Status, nil
+	})
+}
 
-		if err := c.retry.sleep(ctx, c.pollInterval); err != nil {
-			return fmt.Errorf("waiting for operation %s (last status %q): %w", id, op.Status, err)
-		}
-	}
+// WaitUntil polls until done reports true, or ctx ends. It waits on a resource
+// alone, with no operation to follow, for example to see an instance reach
+// running. what names the thing waited for, in errors. A done error ends the wait.
+func (c *Client) WaitUntil(ctx context.Context, what string, done DoneCheck) error {
+	return c.pollUntil(ctx, what, func(ctx context.Context) (bool, string, error) {
+		reached, err := done(ctx)
+		return reached, "", err
+	})
 }
