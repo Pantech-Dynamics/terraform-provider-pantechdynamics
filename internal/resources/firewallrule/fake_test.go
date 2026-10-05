@@ -18,6 +18,11 @@ type fakeAPI struct {
 	opStuck, keepOnDelete                 bool
 	op                                    *client.Operation
 
+	// numberTakenTimes makes the next N creates fail as the platform does while it
+	// still holds a just-deleted rule's number.
+	numberTakenTimes int
+	lists            int
+
 	nextID       int
 	creates      int
 	deletes      int
@@ -36,6 +41,10 @@ func (f *fakeAPI) CreateFirewallRule(_ context.Context, subnetID string, req cli
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
+	if f.numberTakenTimes > 0 {
+		f.numberTakenTimes--
+		return nil, errNumberTaken
+	}
 	f.nextID++
 	id := fmt.Sprintf("aclr_%d", f.nextID)
 	state := f.createState
@@ -52,6 +61,23 @@ func (f *fakeAPI) CreateFirewallRule(_ context.Context, subnetID string, req cli
 	}
 	f.rules = append(f.rules, rule)
 	return &client.OperationReference{OperationID: "op_" + id, ResourceID: id}, nil
+}
+
+// errNumberTaken is the real refusal: 422 VALIDATION_FAILED with the reason on the number field.
+var errNumberTaken = &client.APIError{
+	Status: 422, Code: "VALIDATION_FAILED",
+	Errors: []client.FieldError{{Field: "number", Code: "RULE_NUMBER_TAKEN", Message: "is already used by another rule on this subnet"}},
+}
+
+func (f *fakeAPI) ListFirewallRules(_ context.Context, subnetID string) ([]client.FirewallRule, error) {
+	f.lists++
+	var out []client.FirewallRule
+	for _, r := range f.rules {
+		if r.SubnetID == subnetID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func orDefault(v, def string) string {

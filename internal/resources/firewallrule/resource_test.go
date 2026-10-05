@@ -3,6 +3,7 @@ package firewallrule
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -102,7 +103,6 @@ func TestCreateRefusals(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"number taken", &client.APIError{Status: 409, Code: codeRuleNumberTaken, Detail: "number in use"}, "Pick a different number"},
 		{"not a vpc subnet", &client.APIError{Status: 409, Code: codeRulesNotSupported, Detail: "no"}, "pantechdynamics_security_group"},
 		{"field error", &client.APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []client.FieldError{{Field: "port_end", Code: "INVALID_PORTS", Message: "bad"}}}, "INVALID_PORTS"},
 	}
@@ -116,6 +116,62 @@ func TestCreateRefusals(t *testing.T) {
 				t.Error("nothing was created, so no state should be saved")
 			}
 		})
+	}
+}
+
+// Replacing a rule deletes it and adds it again under the same number, and the
+// platform holds the number for a few seconds. With no live rule on the number,
+// the create must be retried until it is accepted.
+func TestCreateRetriesANumberHeldAfterADelete(t *testing.T) {
+	api := &fakeAPI{numberTakenTimes: 3}
+	s := testSchema(t)
+	resp := &resource.CreateResponse{State: EmptyState(s)}
+	(&Resource{api: api, numberRetryDelay: time.Millisecond}).Create(Ctx, resource.CreateRequest{Plan: sshPlan(s)}, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if api.creates != 4 {
+		t.Errorf("creates = %d, want 4 (three refusals, then accepted)", api.creates)
+	}
+	if getModel(t, resp.State).ID.ValueString() != "aclr_1" {
+		t.Error("the rule was not saved")
+	}
+}
+
+// When another live rule really holds the number, retrying cannot help: fail at once.
+func TestCreateDoesNotRetryANumberAnotherRuleHolds(t *testing.T) {
+	api := &fakeAPI{
+		numberTakenTimes: 100,
+		rules:            []client.FirewallRule{{ID: "aclr_9", SubnetID: "snet_1", Number: 100, ObservedState: "active"}},
+	}
+	s := testSchema(t)
+	resp := &resource.CreateResponse{State: EmptyState(s)}
+	(&Resource{api: api, numberRetryDelay: time.Millisecond}).Create(Ctx, resource.CreateRequest{Plan: sshPlan(s)}, resp)
+
+	if !strings.Contains(ErrorText(resp.Diagnostics), "RULE_NUMBER_TAKEN") {
+		t.Fatalf("diagnostics = %q", ErrorText(resp.Diagnostics))
+	}
+	if api.creates != 1 {
+		t.Errorf("creates = %d, want 1: a real conflict must not be retried", api.creates)
+	}
+	if !IsRemoved(resp.State) {
+		t.Error("nothing was created, so no state should be saved")
+	}
+}
+
+// A number the platform never frees must give up after a bounded number of tries.
+func TestCreateGivesUpOnANumberThatNeverFrees(t *testing.T) {
+	api := &fakeAPI{numberTakenTimes: 1000}
+	s := testSchema(t)
+	resp := &resource.CreateResponse{State: EmptyState(s)}
+	(&Resource{api: api, numberRetryDelay: time.Millisecond}).Create(Ctx, resource.CreateRequest{Plan: sshPlan(s)}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("want an error")
+	}
+	if api.creates != numberRetryMax {
+		t.Errorf("creates = %d, want %d", api.creates, numberRetryMax)
 	}
 }
 
