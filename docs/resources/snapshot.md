@@ -45,7 +45,7 @@ resource "pantechdynamics_snapshot" "web_root" {
 
 ### Required
 
-- `name` (String) Name of the snapshot, unique for its instance or volume. A snapshot that failed still holds its name. Changing it replaces the snapshot.
+- `name` (String) Name of the snapshot, unique for its instance or volume. On the staging platform a snapshot that failed or was deleted keeps its name reserved, so a name cannot be used again. Changing it replaces the snapshot.
 
 ### Optional
 
