@@ -22,6 +22,16 @@ const (
 	// CodeInstanceMustBeStopped refuses a security group change on a running instance.
 	CodeInstanceMustBeStopped = "INSTANCE_MUST_BE_STOPPED"
 
+	// CodeSecurityGroupAllowsPrivateNetwork refuses a private network attach
+	// (409), or a group change while attached (422 on security_group_id), when
+	// the security group lets in any part of the private database network's
+	// range. The detail names the rules to narrow.
+	CodeSecurityGroupAllowsPrivateNetwork = "SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK"
+
+	// CodePrivateNetworkNotAvailable means the instance's zone has no private
+	// database network, or the instance is not a standard one.
+	CodePrivateNetworkNotAvailable = "PRIVATE_NETWORK_NOT_AVAILABLE"
+
 	// FieldCodePlanNotBigger is the field error on plan_slug for a resize to the
 	// same or a smaller plan. Instances only grow.
 	FieldCodePlanNotBigger = "PLAN_NOT_BIGGER"
@@ -41,6 +51,14 @@ const (
 	InstanceDeleting     = "deleting"
 )
 
+// Private network interface states reported in PrivateNetworkState.
+const (
+	PrivateNetworkNone      = "none"
+	PrivateNetworkAttaching = "attaching"
+	PrivateNetworkAttached  = "attached"
+	PrivateNetworkDetaching = "detaching"
+)
+
 // InstanceSpec is the compute capacity pinned to an instance.
 type InstanceSpec struct {
 	VCPU     int64 `json:"vcpu"`
@@ -58,26 +76,31 @@ type InstanceFailure struct {
 // Instance is a virtual machine. The fields follow the live API, which differs
 // from the OpenAPI spec (it has zone, public_ipv4, private_ipv4 and spec).
 type Instance struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	PlanID          string            `json:"plan_id"`
-	PlanSlug        string            `json:"plan_slug"`
-	ImageID         string            `json:"image_id"`
-	ImageSlug       string            `json:"image_slug"`
-	Region          string            `json:"region"`
-	Zone            string            `json:"zone"`
-	NetworkID       *string           `json:"network_id"`
-	SubnetID        *string           `json:"subnet_id"`
-	SecurityGroupID string            `json:"security_group_id"`
-	PublicIPv4      *string           `json:"public_ipv4"`
-	PrivateIPv4     *string           `json:"private_ipv4"`
-	DesiredState    string            `json:"desired_state"`
-	ObservedState   string            `json:"observed_state"`
-	Spec            InstanceSpec      `json:"spec"`
-	Tags            map[string]string `json:"tags"`
-	Failure         *InstanceFailure  `json:"failure"`
-	CreatedAt       *time.Time        `json:"created_at"`
-	UpdatedAt       *time.Time        `json:"updated_at"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	PlanID          string  `json:"plan_id"`
+	PlanSlug        string  `json:"plan_slug"`
+	ImageID         string  `json:"image_id"`
+	ImageSlug       string  `json:"image_slug"`
+	Region          string  `json:"region"`
+	Zone            string  `json:"zone"`
+	NetworkID       *string `json:"network_id"`
+	SubnetID        *string `json:"subnet_id"`
+	SecurityGroupID string  `json:"security_group_id"`
+	PublicIPv4      *string `json:"public_ipv4"`
+	PrivateIPv4     *string `json:"private_ipv4"`
+	// PrivateNetworkState is the interface on the zone's private database
+	// network: none, attaching, attached or detaching. PrivateNetworkIP is its
+	// address once attached, kept while it is being removed.
+	PrivateNetworkState string            `json:"private_network_state"`
+	PrivateNetworkIP    *string           `json:"private_network_ip"`
+	DesiredState        string            `json:"desired_state"`
+	ObservedState       string            `json:"observed_state"`
+	Spec                InstanceSpec      `json:"spec"`
+	Tags                map[string]string `json:"tags"`
+	Failure             *InstanceFailure  `json:"failure"`
+	CreatedAt           *time.Time        `json:"created_at"`
+	UpdatedAt           *time.Time        `json:"updated_at"`
 }
 
 // CreateInstanceRequest orders an instance. Empty optional fields are omitted so
@@ -109,12 +132,6 @@ type securityGroupRequest struct {
 	SecurityGroupID string `json:"security_group_id"`
 }
 
-// listInstancesResponse is one page of the instance list.
-type listInstancesResponse struct {
-	Data       []Instance `json:"data"`
-	NextCursor *string    `json:"next_cursor"`
-}
-
 // CreateInstance orders an instance and returns the order to follow. This spends
 // money, so it is worth knowing why retrying it is safe: the backend replays a
 // create on the same Idempotency-Key and returns the same order, verified on dev,
@@ -138,28 +155,18 @@ func (c *Client) GetInstance(ctx context.Context, id string) (*Instance, error) 
 
 // ListInstances returns every instance, following the cursor.
 func (c *Client) ListInstances(ctx context.Context) ([]Instance, error) {
-	var instances []Instance
-	cursor := ""
-	for {
-		var page listInstancesResponse
-		if err := c.do(ctx, http.MethodGet, listPath("/instances", cursor), nil, &page); err != nil {
-			return nil, fmt.Errorf("listing instances: %w", err)
-		}
-		instances = append(instances, page.Data...)
-
-		next := derefString(page.NextCursor)
-		if next == "" || next == cursor {
-			return instances, nil
-		}
-		cursor = next
+	instances, err := listAll[Instance](ctx, c, "/instances")
+	if err != nil {
+		return nil, fmt.Errorf("listing instances: %w", err)
 	}
+	return instances, nil
 }
 
 // RenameInstance starts renaming an instance. Wait for the returned operation.
-// It is not retried on gateway errors: replay is not verified for rename.
+// It is retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console (spec, 2026-10-05).
 func (c *Client) RenameInstance(ctx context.Context, id, name string) (*OperationReference, error) {
 	var ref OperationReference
-	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/rename", renameRequest{Name: name}, &ref); err != nil {
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/rename", renameRequest{Name: name}, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("renaming instance %s: %w", id, err)
 	}
 	return &ref, nil
@@ -192,11 +199,12 @@ func (c *Client) StartInstance(ctx context.Context, id string) (*OperationRefere
 
 // StopInstance stops a running instance and returns the operation to follow.
 // Only call it when the instance is running: stopping a stopped instance makes
-// the operation fail and leaves the instance in the failed state. It is not
-// retried on gateway errors, because replay of a stop is not verified.
+// the operation fail and leaves the instance in the failed state. It is retried
+// on gateway errors because a replay with the same Idempotency-Key returns the
+// original operation instead of sending a second stop: the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
 func (c *Client) StopInstance(ctx context.Context, id string) (*OperationReference, error) {
 	var ref OperationReference
-	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/stop", nil, &ref); err != nil {
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/stop", nil, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("stopping instance %s: %w", id, err)
 	}
 	return &ref, nil
@@ -206,11 +214,10 @@ func (c *Client) StopInstance(ctx context.Context, id string) (*OperationReferen
 // operation to follow. The platform stops, resizes and restarts it, which took
 // about 4.5 minutes on staging, and the disk grows with the plan. A plan that is
 // not bigger is refused with the field error PLAN_NOT_BIGGER, and a stopped
-// instance with 409. It is not retried on gateway errors: replay of a resize is
-// not verified.
+// instance with 409. It is retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
 func (c *Client) ResizeInstance(ctx context.Context, id, planSlug string) (*OperationReference, error) {
 	var ref OperationReference
-	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/resize", resizeRequest{PlanSlug: planSlug}, &ref); err != nil {
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/resize", resizeRequest{PlanSlug: planSlug}, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("resizing instance %s: %w", id, err)
 	}
 	return &ref, nil
@@ -225,6 +232,28 @@ func (c *Client) ChangeInstanceSecurityGroup(ctx context.Context, id, securityGr
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPut, instancePath(id)+"/security-group", securityGroupRequest{SecurityGroupID: securityGroupID}, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("changing the security group of instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// AttachInstancePrivateNetwork adds an interface on the zone's private database
+// network to a running or stopped standard instance. A security group that lets
+// in the private range is refused with CodeSecurityGroupAllowsPrivateNetwork. It
+// replays on the same key.
+func (c *Client) AttachInstancePrivateNetwork(ctx context.Context, id string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/private-network", nil, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("attaching instance %s to the private network: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// DetachInstancePrivateNetwork removes the private database network interface.
+// It replays on the same key.
+func (c *Client) DetachInstancePrivateNetwork(ctx context.Context, id string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodDelete, instancePath(id)+"/private-network", nil, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("detaching instance %s from the private network: %w", id, err)
 	}
 	return &ref, nil
 }

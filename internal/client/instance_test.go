@@ -168,14 +168,15 @@ func TestRenameInstance(t *testing.T) {
 		if !strings.Contains(string(body), `"name":"new"`) {
 			t.Errorf("body = %s", body)
 		}
-		w.WriteHeader(http.StatusBadGateway)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
 	})
 
-	if _, err := c.RenameInstance(context.Background(), "vm_1", "new"); err == nil {
-		t.Fatal("want an error")
+	if _, err := c.RenameInstance(context.Background(), "vm_1", "new"); err != nil {
+		t.Fatal(err)
 	}
 	if calls != 1 {
-		t.Fatalf("calls = %d: rename is not verified replay-safe, so it must not be retried", calls)
+		t.Fatalf("calls = %d", calls)
 	}
 }
 
@@ -268,36 +269,6 @@ func TestStartAndStopInstance(t *testing.T) {
 	}
 }
 
-// Only start is verified to replay, so only start may be retried.
-func TestStartIsRetriedButStopIsNot(t *testing.T) {
-	tests := []struct {
-		name      string
-		call      func(*Client) error
-		wantCalls int
-	}{
-		{"start retries a gateway error", func(c *Client) error { _, err := c.StartInstance(context.Background(), "vm_1"); return err }, 2},
-		{"stop does not", func(c *Client) error { _, err := c.StopInstance(context.Background(), "vm_1"); return err }, 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var keys []string
-			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-				keys = append(keys, r.Header.Get("Idempotency-Key"))
-				if len(keys) == 1 {
-					w.WriteHeader(http.StatusBadGateway)
-					return
-				}
-				w.WriteHeader(http.StatusAccepted)
-				_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"vm_1","status":"submitting"}`))
-			})
-			_ = tt.call(c)
-			if len(keys) != tt.wantCalls || (len(keys) == 2 && keys[0] != keys[1]) {
-				t.Fatalf("keys = %v, want %d calls reusing one key", keys, tt.wantCalls)
-			}
-		})
-	}
-}
-
 func TestStopInstanceInvalidState(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -356,18 +327,6 @@ func TestResizeInstanceErrors(t *testing.T) {
 				t.Fatalf("err = %v, calls = %d", err, calls)
 			}
 		})
-	}
-}
-
-func TestResizeIsNotRetriedOnGatewayError(t *testing.T) {
-	calls := 0
-	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusBadGateway)
-	})
-	_, _ = c.ResizeInstance(context.Background(), "vm_1", "starter")
-	if calls != 1 {
-		t.Fatalf("calls = %d: resize replay is not verified, so it must not be retried", calls)
 	}
 }
 

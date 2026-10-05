@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 )
@@ -110,7 +109,6 @@ func TestCatalogListsCommonBehaviour(t *testing.T) {
 	}{
 		{"empty list is not an error", 200, `{"data":[],"next_cursor":null}`, func(e error) bool { return e == nil }},
 		{"missing data is an empty list", 200, `{"next_cursor":null}`, func(e error) bool { return e == nil }},
-		{"unexpected cursor fails loudly", 200, `{"data":[],"next_cursor":"more"}`, func(e error) bool { return errors.Is(e, errUnexpectedPagination) }},
 		{"unauthenticated", 401, `{"status":401,"code":"UNAUTHENTICATED"}`, func(e error) bool { return HasCode(e, "UNAUTHENTICATED") }},
 		{"invalid filter", 400, `{"status":400,"code":"INVALID_FILTER","detail":"placement must be one of standard, vpc."}`, func(e error) bool { return HasCode(e, "INVALID_FILTER") }},
 		{"malformed json", 200, `{not json`, func(e error) bool { return e != nil }},

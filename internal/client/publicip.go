@@ -16,13 +16,16 @@ const (
 
 // PublicIP is a public IPv4 address on a VPC network. A static_nat address maps
 // every port to one instance. A port_forwarding address carries forwarding rules.
+// The location field is "zone", as on networks and subnets, not "zone_id".
 type PublicIP struct {
 	ID            string     `json:"id"`
 	NetworkID     string     `json:"network_id"`
-	ZoneID        *string    `json:"zone_id"`
+	NetworkName   *string    `json:"network_name"`
+	Zone          *string    `json:"zone"`
 	Region        *string    `json:"region"`
 	Purpose       string     `json:"purpose"`
 	InstanceID    *string    `json:"instance_id"`
+	InstanceName  *string    `json:"instance_name"`
 	Address       *string    `json:"address"`
 	DesiredState  string     `json:"desired_state"`
 	ObservedState string     `json:"observed_state"`

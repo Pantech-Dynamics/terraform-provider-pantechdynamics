@@ -12,8 +12,10 @@ import (
 type model struct {
 	ID            types.String   `tfsdk:"id"`
 	NetworkID     types.String   `tfsdk:"network_id"`
+	NetworkName   types.String   `tfsdk:"network_name"`
 	Purpose       types.String   `tfsdk:"purpose"`
 	InstanceID    types.String   `tfsdk:"instance_id"`
+	InstanceName  types.String   `tfsdk:"instance_name"`
 	Address       types.String   `tfsdk:"address"`
 	Region        types.String   `tfsdk:"region"`
 	Zone          types.String   `tfsdk:"zone"`
@@ -39,11 +41,13 @@ func fromAPIResponse(prev model, ip *client.PublicIP) model {
 	return model{
 		ID:            types.StringValue(ip.ID),
 		NetworkID:     types.StringValue(ip.NetworkID),
+		NetworkName:   resourcekit.OptionalString(ip.NetworkName),
 		Purpose:       types.StringValue(ip.Purpose),
 		InstanceID:    resourcekit.OptionalString(ip.InstanceID),
+		InstanceName:  resourcekit.OptionalString(ip.InstanceName),
 		Address:       resourcekit.OptionalString(ip.Address),
 		Region:        resourcekit.OptionalString(ip.Region),
-		Zone:          resourcekit.OptionalString(ip.ZoneID),
+		Zone:          resourcekit.OptionalString(ip.Zone),
 		ObservedState: types.StringValue(ip.ObservedState),
 		CreatedAt:     resourcekit.Timestamp(ip.CreatedAt),
 		UpdatedAt:     resourcekit.Timestamp(ip.UpdatedAt),
@@ -57,8 +61,10 @@ func pendingModel(plan model, id string) model {
 	return model{
 		ID:            types.StringValue(id),
 		NetworkID:     plan.NetworkID,
+		NetworkName:   types.StringNull(),
 		Purpose:       plan.Purpose,
 		InstanceID:    plan.InstanceID,
+		InstanceName:  types.StringNull(),
 		Address:       types.StringNull(),
 		Region:        types.StringNull(),
 		Zone:          types.StringNull(),

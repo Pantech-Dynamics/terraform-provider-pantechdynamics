@@ -66,15 +66,21 @@ func (v oneOf) ValidateString(_ context.Context, req validator.StringRequest, re
 	}
 }
 
-// ValidateConfig rejects a security group on a VPC instance. The platform
+// ValidateConfig rejects a security group, or the private database network, on
+// a VPC instance. The platform
 // refuses it (SECURITY_GROUPS_NOT_SUPPORTED_IN_ZONE) only after the order is
 // placed, and a refused order can still reserve credit, so it stops at plan time.
 func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var subnet, group types.String
+	var privateNetwork types.Bool
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subnet_id"), &subnet)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("security_group_id"), &group)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, pathPrivateNetwork, &privateNetwork)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if problem := privateNetworkProblem(subnet, privateNetwork); problem != "" {
+		resp.Diagnostics.AddAttributeError(pathPrivateNetwork, "private_network not allowed in a VPC", problem)
 	}
 	if !subnet.IsNull() && !group.IsNull() {
 		resp.Diagnostics.AddAttributeError(path.Root("security_group_id"), "security_group_id not allowed in a VPC",

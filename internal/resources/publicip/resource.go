@@ -92,6 +92,15 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: replace,
 				Validators:    []validator.String{resourcekit.IDPrefix("instance", "vm_")},
 			},
+			"network_name": schema.StringAttribute{
+				Description:   "Name of the VPC network the address is for, as the platform reports it.",
+				Computed:      true,
+				PlanModifiers: keep,
+			},
+			"instance_name": schema.StringAttribute{
+				Description: "Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding.",
+				Computed:    true,
+			},
 			"address": schema.StringAttribute{
 				Description:   "The public IPv4 address.",
 				Computed:      true,

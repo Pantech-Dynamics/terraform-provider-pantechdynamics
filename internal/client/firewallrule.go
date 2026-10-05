@@ -42,13 +42,6 @@ type CreateFirewallRuleRequest struct {
 	Action    string `json:"action,omitempty"`
 }
 
-// listFirewallRulesResponse accepts both list shapes: the spec's "rules" and the
-// "data" every verified list uses. The live shape is unverified.
-type listFirewallRulesResponse struct {
-	Rules []FirewallRule `json:"rules"`
-	Data  []FirewallRule `json:"data"`
-}
-
 // CreateFirewallRule starts adding a rule to a subnet.
 func (c *Client) CreateFirewallRule(ctx context.Context, subnetID string, req CreateFirewallRuleRequest) (*OperationReference, error) {
 	var ref OperationReference
@@ -58,29 +51,25 @@ func (c *Client) CreateFirewallRule(ctx context.Context, subnetID string, req Cr
 	return &ref, nil
 }
 
-// ListFirewallRules returns the customer's own rules on a subnet. It returns
-// ErrNotFound when the subnet is gone.
+// ListFirewallRules returns the customer's own rules on a subnet, following the
+// cursor. The platform's system_rules are left out: they cannot be managed. It
+// returns ErrNotFound when the subnet is gone.
 func (c *Client) ListFirewallRules(ctx context.Context, subnetID string) ([]FirewallRule, error) {
-	var page listFirewallRulesResponse
-	if err := c.do(ctx, http.MethodGet, subnetPath(subnetID)+"/firewall-rules", nil, &page); err != nil {
+	rules, err := listAll[FirewallRule](ctx, c, subnetPath(subnetID)+"/firewall-rules")
+	if err != nil {
 		return nil, fmt.Errorf("listing firewall rules of subnet %s: %w", subnetID, err)
 	}
-	return append(page.Rules, page.Data...), nil
+	return rules, nil
 }
 
-// GetFirewallRule finds one rule by listing its subnet, because the spec has no
-// single-rule read. It returns ErrNotFound when the rule or the subnet is gone.
+// GetFirewallRule returns one rule of a subnet. It returns ErrNotFound when the
+// rule or the subnet is gone.
 func (c *Client) GetFirewallRule(ctx context.Context, subnetID, id string) (*FirewallRule, error) {
-	rules, err := c.ListFirewallRules(ctx, subnetID)
-	if err != nil {
-		return nil, err
+	var rule FirewallRule
+	if err := c.do(ctx, http.MethodGet, subnetPath(subnetID)+"/firewall-rules/"+url.PathEscape(id), nil, &rule); err != nil {
+		return nil, fmt.Errorf("getting firewall rule %s: %w", id, err)
 	}
-	for i := range rules {
-		if rules[i].ID == id {
-			return &rules[i], nil
-		}
-	}
-	return nil, fmt.Errorf("getting firewall rule %s: %w", id, ErrNotFound)
+	return &rule, nil
 }
 
 // DeleteFirewallRule starts removing a rule.

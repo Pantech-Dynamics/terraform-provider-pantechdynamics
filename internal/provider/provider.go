@@ -8,10 +8,14 @@ import (
 	"time"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/databaseengines"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/lookups"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/database"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/network"
@@ -73,7 +77,7 @@ func (p *PantechDynamicsProvider) Schema(_ context.Context, _ provider.SchemaReq
 		Description: "Manage Pantech Dynamics cloud resources.",
 		Attributes: map[string]schema.Attribute{
 			"base_url": schema.StringAttribute{
-				Description: "Base URL of the Pantech Dynamics API, including the version prefix. Can also be set with the " + envBaseURL + " environment variable.",
+				Description: "Base URL of the Pantech Dynamics public API, including the /public/v1 prefix: https://api.pantechdynamics.com/public/v1 in production. A wrong prefix makes every call fail with 404 GATEWAY_NO_ROUTE. Can also be set with the " + envBaseURL + " environment variable.",
 				Optional:    true,
 			},
 			"api_key": schema.StringAttribute{
@@ -119,7 +123,7 @@ func newClient(cfg providerModel, version string) (*client.Client, diag.Diagnost
 
 	if baseURL == "" {
 		diags.AddAttributeError(path.Root("base_url"), "Missing base_url",
-			"Set base_url in the provider block or the "+envBaseURL+" environment variable.")
+			"Set base_url in the provider block or the "+envBaseURL+" environment variable, for example https://api.pantechdynamics.com/public/v1.")
 	}
 	if apiKey == "" {
 		diags.AddAttributeError(path.Root("api_key"), "Missing api_key",
@@ -176,6 +180,8 @@ func parseRequestTimeout(raw string) (time.Duration, error) {
 // Resources lists the resources this provider offers.
 func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		database.New,
+		databasesnapshot.New,
 		firewallrule.New,
 		instance.New,
 		network.New,
@@ -193,9 +199,14 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		databaseengines.New,
 		diskofferings.New,
 		images.New,
 		images.NewSingle,
+		lookups.NewInstance,
+		lookups.NewNetwork,
+		lookups.NewSecurityGroup,
+		lookups.NewSSHKey,
 		plans.New,
 		plans.NewSingle,
 		regions.New,

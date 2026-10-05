@@ -29,13 +29,15 @@ const (
 	FrequencyMonthly = "monthly"
 )
 
-// Snapshot is a point-in-time copy of an instance's root disk or of a volume.
-// Exactly one of InstanceID and VolumeID is set.
+// Snapshot is a point-in-time copy of an instance's root disk, a volume or a
+// managed database's data disk. Exactly one of InstanceID, VolumeID and
+// DatabaseID is set.
 type Snapshot struct {
 	ID                 string     `json:"id"`
 	Name               string     `json:"name"`
 	InstanceID         *string    `json:"instance_id"`
 	VolumeID           *string    `json:"volume_id"`
+	DatabaseID         *string    `json:"database_id"`
 	SourceInstanceName *string    `json:"source_instance_name"`
 	VolumeName         *string    `json:"volume_name"`
 	Region             *string    `json:"region"`
@@ -76,11 +78,6 @@ type restoreSnapshotRequest struct {
 	SizeGB           int64  `json:"size_gb,omitempty"`
 }
 
-type listSnapshotsResponse struct {
-	Data       []Snapshot `json:"data"`
-	NextCursor *string    `json:"next_cursor"`
-}
-
 // CreateInstanceSnapshot starts a snapshot of an instance's root disk. On staging
 // it succeeded for a stopped instance and failed for a running one. It is retried
 // on gateway errors because the backend replays it on the same Idempotency-Key.
@@ -114,28 +111,18 @@ func (c *Client) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) 
 
 // ListSnapshots returns every live snapshot, following the cursor.
 func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
-	var snaps []Snapshot
-	cursor := ""
-	for {
-		var page listSnapshotsResponse
-		if err := c.do(ctx, http.MethodGet, listPath("/snapshots", cursor), nil, &page); err != nil {
-			return nil, fmt.Errorf("listing snapshots: %w", err)
-		}
-		snaps = append(snaps, page.Data...)
-
-		next := derefString(page.NextCursor)
-		if next == "" || next == cursor {
-			return snaps, nil
-		}
-		cursor = next
+	snaps, err := listAll[Snapshot](ctx, c, "/snapshots")
+	if err != nil {
+		return nil, fmt.Errorf("listing snapshots: %w", err)
 	}
+	return snaps, nil
 }
 
 // DeleteSnapshot starts deleting a snapshot. A repeated delete returns a new
-// operation. It is not retried on gateway errors: delete replay is unverified.
+// operation. It is retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
 func (c *Client) DeleteSnapshot(ctx context.Context, id string) (*OperationReference, error) {
 	var ref OperationReference
-	if err := c.do(ctx, http.MethodDelete, snapshotPath(id), nil, &ref); err != nil {
+	if err := c.do(ctx, http.MethodDelete, snapshotPath(id), nil, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("deleting snapshot %s: %w", id, err)
 	}
 	return &ref, nil

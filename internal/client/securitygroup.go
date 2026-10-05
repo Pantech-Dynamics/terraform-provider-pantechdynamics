@@ -17,6 +17,10 @@ const (
 	// CodeInvalidResourceState is returned, for a delete, while an instance still
 	// uses the group.
 	CodeInvalidResourceState = "INVALID_RESOURCE_STATE"
+
+	// CodeSecurityGroupAttachedToDatabase means a database still uses the group
+	// as a source of access ranges. Detach it from the database first.
+	CodeSecurityGroupAttachedToDatabase = "SECURITY_GROUP_ATTACHED_TO_DATABASE"
 )
 
 // SecurityGroupRule is one firewall rule. PortRange is a single port ("22"), an
@@ -51,12 +55,6 @@ type replaceRulesRequest struct {
 	Rules []SecurityGroupRule `json:"rules"`
 }
 
-// listSecurityGroupsResponse is one page of the group list.
-type listSecurityGroupsResponse struct {
-	Data       []SecurityGroup `json:"data"`
-	NextCursor *string         `json:"next_cursor"`
-}
-
 // CreateSecurityGroup starts creating a group. The call returns once the backend
 // has accepted it; wait for the returned operation to know the outcome. It is
 // retried on gateway errors because the backend replays it on an Idempotency-Key.
@@ -79,21 +77,11 @@ func (c *Client) GetSecurityGroup(ctx context.Context, id string) (*SecurityGrou
 
 // ListSecurityGroups returns every group, following the cursor.
 func (c *Client) ListSecurityGroups(ctx context.Context) ([]SecurityGroup, error) {
-	var groups []SecurityGroup
-	cursor := ""
-	for {
-		var page listSecurityGroupsResponse
-		if err := c.do(ctx, http.MethodGet, listPath("/security-groups", cursor), nil, &page); err != nil {
-			return nil, fmt.Errorf("listing security groups: %w", err)
-		}
-		groups = append(groups, page.Data...)
-
-		next := derefString(page.NextCursor)
-		if next == "" || next == cursor {
-			return groups, nil
-		}
-		cursor = next
+	groups, err := listAll[SecurityGroup](ctx, c, "/security-groups")
+	if err != nil {
+		return nil, fmt.Errorf("listing security groups: %w", err)
 	}
+	return groups, nil
 }
 
 // ReplaceSecurityGroupRules starts replacing the group's whole rule set. A rule
