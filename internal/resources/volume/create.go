@@ -22,7 +22,7 @@ type placed struct {
 // name is refused up front, so a recovery by name can never adopt the wrong one.
 // And an ambiguous failure (the connection dropped, or a 5xx) is resolved by
 // asking the backend, never by ordering again.
-func placeVolume(ctx context.Context, api volumeAPI, req client.CreateVolumeRequest) (placed, error) {
+func placeVolume(ctx context.Context, api volumeAPI, req client.CreateVolumeRequest, sourceSnapshotID string) (placed, error) {
 	existing, err := findByName(ctx, api, req.Name)
 	if err != nil {
 		return placed{}, fmt.Errorf("checking existing volumes: %w", err)
@@ -31,7 +31,7 @@ func placeVolume(ctx context.Context, api volumeAPI, req client.CreateVolumeRequ
 		return placed{}, fmt.Errorf("a volume named %q already exists (%s). Choose another name, or bring the existing volume under Terraform with `terraform import pantechdynamics_volume.<name> %s`", req.Name, existing.ID, existing.ID)
 	}
 
-	ref, err := api.CreateVolume(ctx, req)
+	ref, err := orderVolume(ctx, api, req, sourceSnapshotID)
 	if err == nil {
 		return placed{VolumeID: ref.ResourceID, OperationID: ref.OperationID}, nil
 	}
@@ -48,6 +48,16 @@ func placeVolume(ctx context.Context, api volumeAPI, req client.CreateVolumeRequ
 		return placed{}, err
 	}
 	return placed{VolumeID: found.ID}, nil
+}
+
+// orderVolume sends the order: a fresh volume, or a volume restored from a snapshot.
+// Both are retried on gateway errors, because the backend replays each on its
+// Idempotency-Key.
+func orderVolume(ctx context.Context, api volumeAPI, req client.CreateVolumeRequest, sourceSnapshotID string) (*client.OperationReference, error) {
+	if sourceSnapshotID != "" {
+		return api.RestoreSnapshot(ctx, sourceSnapshotID, req.Name, req.DiskOfferingSlug, req.SizeGB)
+	}
+	return api.CreateVolume(ctx, req)
 }
 
 // findByName returns the live volume with this exact name, or nil. Deleted

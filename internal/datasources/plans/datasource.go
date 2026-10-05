@@ -53,25 +53,29 @@ func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp 
 				Validators:  []validator.String{oneOf{allowed: []string{client.PlacementStandard, client.PlacementVPC}}},
 			},
 			"plans": schema.ListNestedAttribute{
-				Description: "The available plans.",
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id":                     schema.StringAttribute{Computed: true, Description: "Identifier of the plan."},
-						"slug":                   schema.StringAttribute{Computed: true, Description: "Stable short name of the plan, used when creating an instance."},
-						"name":                   schema.StringAttribute{Computed: true, Description: "Display name of the plan."},
-						"vcpu":                   schema.Int64Attribute{Computed: true, Description: "Number of virtual CPUs."},
-						"memory_mb":              schema.Int64Attribute{Computed: true, Description: "Memory in megabytes."},
-						"disk_gb":                schema.Int64Attribute{Computed: true, Description: "Root disk size in gigabytes."},
-						"price_currency":         schema.StringAttribute{Computed: true, Description: "Currency of the prices below, in your account's currency. Null when the plan is unpriced."},
-						"monthly_estimate_minor": schema.Int64Attribute{Computed: true, Description: "Estimated cost of running the plan for a full month, in minor currency units (for example kobo or cents). An estimate from a display-only cache, not a quote."},
-						"storage_floor_minor":    schema.Int64Attribute{Computed: true, Description: "Estimated cost of a full month while the instance is stopped, in minor currency units."},
-						"initial_payment_minor":  schema.Int64Attribute{Computed: true, Description: "Estimated amount due when the instance is ordered, in minor currency units."},
-						"unpriced_reason":        schema.StringAttribute{Computed: true, Description: "Why no price is available, or null when the plan is priced."},
-					},
-				},
+				Description:  "The available plans.",
+				Computed:     true,
+				NestedObject: schema.NestedAttributeObject{Attributes: planAttributes()},
 			},
 		},
+	}
+}
+
+// planAttributes describes one plan. The list and the single-plan data source
+// share it, so a plan reads the same in both.
+func planAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"id":                     schema.StringAttribute{Computed: true, Description: "Identifier of the plan."},
+		"slug":                   schema.StringAttribute{Computed: true, Description: "Stable short name of the plan, used when creating an instance."},
+		"name":                   schema.StringAttribute{Computed: true, Description: "Display name of the plan."},
+		"vcpu":                   schema.Int64Attribute{Computed: true, Description: "Number of virtual CPUs."},
+		"memory_mb":              schema.Int64Attribute{Computed: true, Description: "Memory in megabytes."},
+		"disk_gb":                schema.Int64Attribute{Computed: true, Description: "Root disk size in gigabytes."},
+		"price_currency":         schema.StringAttribute{Computed: true, Description: "Currency of the prices below, in your account's currency. Null when the plan is unpriced."},
+		"monthly_estimate_minor": schema.Int64Attribute{Computed: true, Description: "Estimated cost of running the plan for a full month, in minor currency units (for example kobo or cents). An estimate from a display-only cache, not a quote."},
+		"storage_floor_minor":    schema.Int64Attribute{Computed: true, Description: "Estimated cost of a full month while the instance is stopped, in minor currency units."},
+		"initial_payment_minor":  schema.Int64Attribute{Computed: true, Description: "Estimated amount due when the instance is ordered, in minor currency units."},
+		"unpriced_reason":        schema.StringAttribute{Computed: true, Description: "Why no price is available, or null when the plan is priced."},
 	}
 }
 

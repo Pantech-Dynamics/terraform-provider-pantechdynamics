@@ -58,6 +58,7 @@ func TestAPIErrorIs(t *testing.T) {
 		{"resource not found", &APIError{Status: 404, Code: "RESOURCE_NOT_FOUND"}, true, false},
 		{"gateway no route", &APIError{Status: 404, Code: "GATEWAY_NO_ROUTE"}, false, true},
 		{"bare 404 is neither", &APIError{Status: 404}, false, false},
+		{"missing snapshot schedule counts as not found", &APIError{Status: 404, Code: "SNAPSHOT_SCHEDULE_NOT_FOUND"}, true, false},
 		{"unauthenticated", &APIError{Status: 401, Code: "UNAUTHENTICATED"}, false, false},
 	}
 	for _, tt := range tests {

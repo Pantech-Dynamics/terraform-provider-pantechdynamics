@@ -56,3 +56,14 @@ resource "pantechdynamics_instance" "web" {
 output "web_address" {
   value = pantechdynamics_instance.web.private_ipv4
 }
+
+# An instance in a VPC subnet instead. It has only a private address, so attach a
+# pantechdynamics_public_ip to reach it from outside, and it cannot use a security
+# group: the subnet's firewall rules apply. Use a plan from the "vpc" placement.
+# resource "pantechdynamics_instance" "private" {
+#   name       = "private-1"
+#   plan_slug  = "individual"
+#   image_slug = "ubuntu-24-04"
+#   ssh_key_id = pantechdynamics_ssh_key.admin.id
+#   subnet_id  = pantechdynamics_subnet.web.id
+# }

@@ -89,6 +89,8 @@ type CreateInstanceRequest struct {
 	SSHKeyID        string            `json:"ssh_key_id,omitempty"`
 	Region          string            `json:"region,omitempty"`
 	SecurityGroupID string            `json:"security_group_id,omitempty"`
+	SubnetID        string            `json:"subnet_id,omitempty"`
+	NetworkID       string            `json:"network_id,omitempty"`
 	Tags            map[string]string `json:"tags,omitempty"`
 }
 

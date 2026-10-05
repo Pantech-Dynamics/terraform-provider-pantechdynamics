@@ -24,6 +24,10 @@ var (
 const (
 	codeResourceNotFound = "RESOURCE_NOT_FOUND"
 	codeGatewayNoRoute   = "GATEWAY_NO_ROUTE"
+
+	// codeSnapshotScheduleNotFound is the 404 for a resource that has no
+	// snapshot schedule yet. It counts as "not found" like any missing resource.
+	codeSnapshotScheduleNotFound = "SNAPSHOT_SCHEDULE_NOT_FOUND"
 )
 
 // FieldError is one entry of a 422 validation failure.
@@ -81,7 +85,7 @@ func (e *APIError) Error() string {
 func (e *APIError) Is(target error) bool {
 	switch target {
 	case ErrNotFound:
-		return e.Code == codeResourceNotFound
+		return e.Code == codeResourceNotFound || e.Code == codeSnapshotScheduleNotFound
 	case ErrNoRoute:
 		return e.Code == codeGatewayNoRoute
 	default:

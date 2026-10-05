@@ -63,4 +63,15 @@ var instanceIDCheck = stringCheck{
 	},
 }
 
+// snapshotIDCheck catches an id of the wrong kind at plan time.
+var snapshotIDCheck = stringCheck{
+	description: "must be a snapshot id starting with snap_",
+	problem: func(v string) string {
+		if !strings.HasPrefix(v, "snap_") {
+			return "Expected a snapshot id starting with \"snap_\", got " + quote(v) + "."
+		}
+		return ""
+	},
+}
+
 func quote(s string) string { return `"` + s + `"` }
