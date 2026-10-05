@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
 )
 
 // settableFields are the attributes a 422 may point at. A field name the schema
@@ -74,7 +75,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 		diags.AddError(summary, "Stopped waiting for instance "+id+": "+err.Error()+
 			"\n\nThe order may still complete, and credit may already be reserved. Run `terraform refresh` to see the current state before applying again.")
 	default:
-		diags.AddError(summary, err.Error())
+		diags.AddError(summary, resourcekit.WithFailureHint(err))
 	}
 }
 

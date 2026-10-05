@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
 )
 
 // settableFields are the attributes a 422 may point at. A field name the schema
@@ -54,7 +55,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id, hint string, err error) 
 	var opErr *client.OperationError
 	switch {
 	case errors.As(err, &opErr):
-		diags.AddError(summary, err.Error()+hint+"\n\nThe failed snapshot "+id+" still exists and holds its name. The next apply deletes it and tries again, but a deleted snapshot's name stays reserved on staging, so that retry can be refused with SNAPSHOT_NAME_TAKEN. If it is, choose a new name.")
+		diags.AddError(summary, resourcekit.WithFailureHint(err)+hint+"\n\nThe failed snapshot "+id+" still exists and holds its name. The next apply deletes it and tries again, but a deleted snapshot's name stays reserved on staging, so that retry can be refused with SNAPSHOT_NAME_TAKEN. If it is, choose a new name.")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		diags.AddError(summary, "Stopped waiting for snapshot "+id+": "+err.Error()+
 			"\n\nThe snapshot may still complete. Run `terraform refresh` to see the current state before applying again.")

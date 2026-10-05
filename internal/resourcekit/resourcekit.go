@@ -124,7 +124,7 @@ func AddWaitError(diags *diag.Diagnostics, summary, kind, id string, err error) 
 			"\n\nThe backend may still complete the change. Run `terraform refresh` to see the current state.")
 		return
 	}
-	diags.AddError(summary, err.Error())
+	diags.AddError(summary, WithFailureHint(err))
 }
 
 // AddHintedError reports an error and, for the given problem codes, appends a

@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
 )
 
 // ordered is the outcome of placing an order: either the order to follow, or a
@@ -268,8 +269,12 @@ func (r *Resource) changePassword(ctx context.Context, id, password string) erro
 // failedError explains a failed database with the platform's failure code.
 func failedError(db *client.Database) error {
 	msg := fmt.Sprintf("database %s is in the failed state", db.ID)
+	hint := ""
 	if db.FailureCode != nil && *db.FailureCode != "" {
 		msg += " (" + *db.FailureCode + ")"
+		if h := resourcekit.FailureCodeHint(*db.FailureCode); h != "" {
+			hint = " " + h
+		}
 	}
-	return errors.New(msg + ". Delete it and create it again, for example with `terraform apply -replace=<address>`")
+	return errors.New(msg + ". Delete it and create it again, for example with `terraform apply -replace=<address>`." + hint)
 }

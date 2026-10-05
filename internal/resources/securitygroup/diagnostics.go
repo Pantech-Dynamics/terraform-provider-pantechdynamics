@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
 )
 
 // attributeFor maps a 422 field to a schema attribute. A field inside a rule,
@@ -86,7 +87,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 	var opErr *client.OperationError
 	switch {
 	case errors.As(err, &opErr):
-		diags.AddError(summary, err.Error())
+		diags.AddError(summary, resourcekit.WithFailureHint(err))
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		diags.AddError(summary, "Stopped waiting for security group "+id+": "+err.Error()+
 			"\n\nThe backend may still complete the change. Run `terraform refresh` to see the current state.")
