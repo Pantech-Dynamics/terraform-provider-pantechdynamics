@@ -32,8 +32,10 @@ resource "pantechdynamics_database" "orders" {
 
   # The data disk in GB. Omit it for the plan's disk_gb. Increasing it grows the
   # disk in place, online; it can never shrink: a smaller value is an error at
-  # plan time, and the database is never replaced for it. At most 2000 GB, and
-  # above the plan's size a multiple of 10 GB.
+  # plan time, and the database is never replaced for it. Each zone's limits
+  # (min_gb, max_gb, step_gb) and price per GB are in the storage list of
+  # pantechdynamics_database_engines: 2000 GB at most and, above the plan's
+  # size, a multiple of 10 GB today.
   storage_gb = 40
 
   # The whole allow-list, replaced in place on change. Omit it to keep the zone's

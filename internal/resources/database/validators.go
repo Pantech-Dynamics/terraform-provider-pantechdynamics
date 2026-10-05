@@ -118,7 +118,7 @@ func (passwordValidator) ValidateString(_ context.Context, req validator.StringR
 type accessRulesValidator struct{}
 
 func (accessRulesValidator) Description(context.Context) string {
-	return fmt.Sprintf("must be at most %d IPv4 CIDRs, each /%d or longer", maxAccessRules, minAccessPrefix)
+	return fmt.Sprintf("must be at most %d IPv4 CIDRs, each /%d to /32 with its host bits clear", maxAccessRules, minAccessPrefix)
 }
 
 func (v accessRulesValidator) MarkdownDescription(ctx context.Context) string {

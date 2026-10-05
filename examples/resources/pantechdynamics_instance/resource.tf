@@ -70,7 +70,8 @@ output "web_address" {
 
 # A standard instance on the zone's private database network, so it reaches
 # managed databases by their private address. Its security group must let in
-# nothing from the private network's range (10.250.0.0/20 in af-abj-1): a group
+# nothing from the private network's range (the standard placement's
+# private_network_cidr in pantechdynamics_region, 10.250.0.0/20 in af-abj-1): a group
 # applies to every interface, so 0.0.0.0/0 rules, ICMP ones too, are refused with
 # SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK, and the error names the rules to narrow.
 resource "pantechdynamics_security_group" "app" {

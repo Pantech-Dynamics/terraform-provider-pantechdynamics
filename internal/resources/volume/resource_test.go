@@ -246,7 +246,7 @@ func TestCreate(t *testing.T) {
 		resp := create(api, map[string]tftypes.Value{"instance_id": str("vm_1")})
 
 		text := errorText(resp.Diagnostics)
-		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, `"shared"`) || !strings.Contains(text, "can still be deleted") {
+		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, "quote the operation id") || !strings.Contains(text, `"shared"`) || !strings.Contains(text, "can still be deleted") {
 			t.Fatalf("diags = %s", text)
 		}
 		v := api.find("vol_1")
