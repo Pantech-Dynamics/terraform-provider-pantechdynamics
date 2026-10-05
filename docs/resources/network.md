@@ -3,12 +3,12 @@
 page_title: "pantechdynamics_network Resource - pantechdynamics"
 subcategory: ""
 description: |-
-  A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.
+  A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly, and it takes one public address from the zone's pool, so creating one fails with IP_POOL_EXHAUSTED when the pool is empty. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.
 ---
 
 # pantechdynamics_network (Resource)
 
-A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.
+A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly, and it takes one public address from the zone's pool, so creating one fails with IP_POOL_EXHAUSTED when the pool is empty. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.
 
 ## Example Usage
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -25,7 +26,17 @@ const (
 	idPrefix       = "aclr_"
 	subnetIDPrefix = "snet_"
 
-	codeRuleNumberTaken     = "RULE_NUMBER_TAKEN"
+	// fieldCodeRuleNumberTaken is the field error on number. The top-level code is
+	// the generic VALIDATION_FAILED, so it is read from the errors list.
+	fieldCodeRuleNumberTaken = "RULE_NUMBER_TAKEN"
+
+	// A deleted rule keeps its number for a few seconds (3 to 5 on staging) after
+	// it disappears from the API, so replacing a rule, which deletes it and adds
+	// it again under the same number, is refused at first. The create is retried
+	// when no other rule holds the number.
+	numberRetryDelay = 3 * time.Second
+	numberRetryMax   = 10
+
 	codeRulesNotSupported   = "FIREWALL_RULES_NOT_SUPPORTED"
 	codeSubnetNotUsable     = "SUBNET_NOT_USABLE"
 	codeInvalidFirewallRule = "INVALID_FIREWALL_RULE"
@@ -35,6 +46,7 @@ const (
 // by the consumer, so tests can fake it.
 type ruleAPI interface {
 	CreateFirewallRule(ctx context.Context, subnetID string, req client.CreateFirewallRuleRequest) (*client.OperationReference, error)
+	ListFirewallRules(ctx context.Context, subnetID string) ([]client.FirewallRule, error)
 	GetFirewallRule(ctx context.Context, subnetID, id string) (*client.FirewallRule, error)
 	DeleteFirewallRule(ctx context.Context, id string) (*client.OperationReference, error)
 	GetOperation(ctx context.Context, id string) (*client.Operation, error)
@@ -50,6 +62,10 @@ var (
 // Resource manages one firewall rule on a VPC subnet.
 type Resource struct {
 	api ruleAPI
+
+	// numberRetryDelay is the pause between retries of a number the platform still
+	// holds. Zero means the default, so tests can shorten it.
+	numberRetryDelay time.Duration
 }
 
 // New is the factory the provider registers.
@@ -185,7 +201,7 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	defer cancel()
 
 	subnetID := plan.SubnetID.ValueString()
-	ref, err := r.api.CreateFirewallRule(ctx, subnetID, toCreateRequest(plan))
+	ref, err := r.createRule(ctx, subnetID, toCreateRequest(plan))
 	if err != nil {
 		resourcekit.AddHintedAPIError(&resp.Diagnostics, "Error creating firewall rule", err, attributeFor, createHints)
 		return
@@ -280,6 +296,46 @@ func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequ
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
 }
 
+// createRule adds the rule. A refused number is retried only when no live rule on
+// the subnet holds it: then the number is the leftover of a rule that was just
+// deleted, and it frees within seconds. If another rule holds it, the refusal is
+// real and is returned at once.
+func (r *Resource) createRule(ctx context.Context, subnetID string, req client.CreateFirewallRuleRequest) (*client.OperationReference, error) {
+	delay := r.numberRetryDelay
+	if delay == 0 {
+		delay = numberRetryDelay
+	}
+	for attempt := 1; ; attempt++ {
+		ref, err := r.api.CreateFirewallRule(ctx, subnetID, req)
+		if err == nil || !client.HasFieldCode(err, "number", fieldCodeRuleNumberTaken) || attempt >= numberRetryMax {
+			return ref, err
+		}
+		taken, listErr := r.numberInUse(ctx, subnetID, req.Number)
+		if listErr != nil || taken {
+			return ref, err
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
+}
+
+// numberInUse reports whether a live rule on the subnet has this number.
+func (r *Resource) numberInUse(ctx context.Context, subnetID string, number int64) (bool, error) {
+	rules, err := r.api.ListFirewallRules(ctx, subnetID)
+	if err != nil {
+		return false, err
+	}
+	for _, rule := range rules {
+		if rule.Number == number && rule.ObservedState != resourcekit.StateDeleted {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // status reads the rule's state for the shared done checks.
 func (r *Resource) status(subnetID, id string) resourcekit.StatusGetter {
 	return func(ctx context.Context) (resourcekit.Status, error) {
@@ -293,7 +349,6 @@ func (r *Resource) status(subnetID, id string) resourcekit.StatusGetter {
 
 // createHints explain the refusals a user can act on.
 var createHints = map[string]string{
-	codeRuleNumberTaken:     "Another rule on this subnet already uses this number. Pick a different number between 100 and 9999.",
 	codeRulesNotSupported:   "Firewall rules exist only on VPC subnets. For a standard instance use pantechdynamics_security_group instead.",
 	codeSubnetNotUsable:     "The subnet is not active yet, or is being deleted. Make sure it exists and is active, then try again.",
 	codeInvalidFirewallRule: "The platform refused this combination of protocol, ports and CIDR.",
