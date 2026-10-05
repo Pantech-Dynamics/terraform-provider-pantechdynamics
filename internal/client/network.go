@@ -50,6 +50,16 @@ func (c *Client) GetNetwork(ctx context.Context, id string) (*Network, error) {
 	return &n, nil
 }
 
+// ListNetworks returns every live network, following the cursor. A failed or
+// deleted network is not listed.
+func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
+	networks, err := listAll[Network](ctx, c, "/networks")
+	if err != nil {
+		return nil, fmt.Errorf("listing networks: %w", err)
+	}
+	return networks, nil
+}
+
 // DeleteNetwork starts deleting a network. The backend refuses while instances
 // or public IPs remain in it.
 func (c *Client) DeleteNetwork(ctx context.Context, id string) (*OperationReference, error) {

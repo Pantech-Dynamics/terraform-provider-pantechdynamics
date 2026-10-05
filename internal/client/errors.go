@@ -77,6 +77,9 @@ func (e *APIError) Error() string {
 	if e.RequestID != "" {
 		msg += " (request_id: " + e.RequestID + ")"
 	}
+	if e.Code == codeGatewayNoRoute {
+		msg += ". Check base_url: it must include the /public/v1 prefix, for example https://api.pantechdynamics.com/public/v1"
+	}
 	return msg
 }
 

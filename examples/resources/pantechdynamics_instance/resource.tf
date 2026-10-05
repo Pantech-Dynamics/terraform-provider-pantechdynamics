@@ -67,3 +67,35 @@ output "web_address" {
 #   ssh_key_id = pantechdynamics_ssh_key.admin.id
 #   subnet_id  = pantechdynamics_subnet.web.id
 # }
+
+# A standard instance on the zone's private database network, so it reaches
+# managed databases by their private address. Its security group must let in
+# nothing from the private network's range (10.250.0.0/20 in af-abj-1): a group
+# applies to every interface, so 0.0.0.0/0 rules, ICMP ones too, are refused with
+# SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK, and the error names the rules to narrow.
+resource "pantechdynamics_security_group" "app" {
+  name = "app-tier"
+  rules = [
+    { direction = "ingress", protocol = "tcp", port_range = "22", cidr = "203.0.113.0/24" },
+    { direction = "ingress", protocol = "tcp", port_range = "443", cidr = "198.51.100.0/24" },
+    { direction = "egress", protocol = "all", cidr = "0.0.0.0/0" },
+  ]
+}
+
+resource "pantechdynamics_instance" "app" {
+  name              = "app-1"
+  plan_slug         = "individual"
+  image_slug        = "ubuntu-24-04"
+  ssh_key_id        = pantechdynamics_ssh_key.admin.id
+  security_group_id = pantechdynamics_security_group.app.id
+
+  # Attached and detached in place, without a restart. Inside the guest, add the
+  # new interface to netplan with dhcp4: true and
+  # dhcp4-overrides { use-routes: false, use-dns: false }, then netplan apply.
+  private_network = true
+}
+
+# Allow this address on a database as a /32 access rule.
+output "app_private_network_ip" {
+  value = pantechdynamics_instance.app.private_network_ip
+}

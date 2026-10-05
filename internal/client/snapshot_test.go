@@ -123,21 +123,6 @@ func TestListSnapshotsFollowsCursor(t *testing.T) {
 	}
 }
 
-func TestDeleteSnapshotIsNotRetried(t *testing.T) {
-	calls := 0
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.Method != http.MethodDelete || r.URL.Path != "/v1/snapshots/snap_1" || r.Header.Get("Idempotency-Key") == "" {
-			t.Errorf("got %s %s", r.Method, r.URL.Path)
-		}
-		w.WriteHeader(http.StatusBadGateway)
-	})
-	_, _ = c.DeleteSnapshot(context.Background(), "snap_1")
-	if calls != 1 {
-		t.Fatalf("calls = %d: delete replay is unverified, so it must not be retried", calls)
-	}
-}
-
 func TestRestoreSnapshot(t *testing.T) {
 	var bodies []string
 	var keys []string

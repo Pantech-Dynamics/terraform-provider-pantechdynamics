@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -45,6 +46,8 @@ type instanceAPI interface {
 	StopInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	ResizeInstance(ctx context.Context, id, planSlug string) (*client.OperationReference, error)
 	ChangeInstanceSecurityGroup(ctx context.Context, id, securityGroupID string) (*client.OperationReference, error)
+	AttachInstancePrivateNetwork(ctx context.Context, id string) (*client.OperationReference, error)
+	DetachInstancePrivateNetwork(ctx context.Context, id string) (*client.OperationReference, error)
 	DeleteInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	WaitForInstanceOrder(ctx context.Context, id string) (*client.InstanceOrder, error)
 	WaitForOperation(ctx context.Context, id string, done client.DoneCheck) error
@@ -171,6 +174,19 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Description: "IPv4 address of the instance on its network.",
 				Computed:    true,
 			},
+			"private_network": schema.BoolAttribute{
+				Description: "Whether the instance has a second network interface on its zone's private database network, so it can reach managed databases by their private address. Standard instances only (no subnet_id), in a zone that has the network. Changing it attaches or detaches the interface in place, without a restart, on a running or stopped instance. Omit it to leave the interface as it is. " +
+					"The instance's security group must let in nothing from the private network's range (10.250.0.0/20 in af-abj-1), including through 0.0.0.0/0 or ICMP rules, because a group applies to every interface: the API refuses the attach with SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK and names the rules to narrow, and while attached it refuses rule changes and group changes that would let the range in. " +
+					"Inside the guest the interface stays down until configured: on Ubuntu add it to netplan with dhcp4: true and dhcp4-overrides {use-routes: false, use-dns: false}, then netplan apply.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"private_network_ip": schema.StringAttribute{
+				Description:   "Address of the private database network interface once attached, or null. Allow it on a pantechdynamics_database as a /32 in access_rules.",
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{privateIPFollowsAttachment{}},
+			},
 			"created_at": schema.StringAttribute{
 				Description:   "When the instance was created, in RFC 3339 UTC, to the second.",
 				Computed:      true,
@@ -247,7 +263,21 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() || plan.DesiredState.ValueString() != client.InstanceStopped {
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !plan.PrivateNetwork.IsUnknown() && plan.PrivateNetwork.ValueBool() {
+		if err := r.setPrivateNetwork(ctx, id, true); err != nil {
+			addPrivateNetworkError(&resp.Diagnostics, "Error attaching the new instance to the private network", id, err)
+			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+			return
+		}
+		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	if plan.DesiredState.ValueString() != client.InstanceStopped {
 		return
 	}
 
@@ -284,8 +314,8 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	resp.Diagnostics.Append(resp.State.Set(ctx, next)...)
 }
 
-// Update applies the in-place changes: rename, security group, plan and power
-// state. Every other change replaces the instance.
+// Update applies the in-place changes: private network, rename, security group,
+// plan and power state. Every other change replaces the instance.
 //
 // The order saves downtime. A security group change needs the instance stopped
 // and a resize needs it running, so a group change leaves it stopped, a resize
@@ -310,7 +340,23 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	groupChanged := knownString(plan.SecurityGroupID) != "" && !plan.SecurityGroupID.Equal(state.SecurityGroupID)
 	planChanged := !plan.PlanSlug.Equal(state.PlanSlug)
 	powerChanged := !plan.DesiredState.Equal(state.DesiredState)
+	wantNetwork := !plan.PrivateNetwork.IsNull() && !plan.PrivateNetwork.IsUnknown()
+	attach := wantNetwork && plan.PrivateNetwork.ValueBool() && !state.PrivateNetwork.ValueBool()
+	detach := wantNetwork && !plan.PrivateNetwork.ValueBool() && state.PrivateNetwork.ValueBool()
 
+	// Detach first: while attached, the platform refuses a move to a group that
+	// lets in the private range.
+	if detach {
+		if err := r.setPrivateNetwork(ctx, id, false); err != nil {
+			addPrivateNetworkError(&resp.Diagnostics, "Error detaching the instance from the private network", id, err)
+			r.refresh(ctx, state, id, &resp.State, &resp.Diagnostics)
+			return
+		}
+		r.refresh(ctx, state, id, &resp.State, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 	if renamed {
 		if !r.rename(ctx, id, plan, &resp.State, &resp.Diagnostics) {
 			return
@@ -335,6 +381,16 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 		}
 		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	// Attach last: a group change in the same apply may be what makes the group
+	// acceptable for the private network.
+	if attach {
+		if err := r.setPrivateNetwork(ctx, id, true); err != nil {
+			addPrivateNetworkError(&resp.Diagnostics, "Error attaching the instance to the private network", id, err)
+			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 			return
 		}
 	}

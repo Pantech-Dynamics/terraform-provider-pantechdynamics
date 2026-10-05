@@ -16,8 +16,8 @@ import (
 type fakeAPI struct {
 	instances []client.Instance
 
-	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr error
-	createLands, opStuck, deleteHard                                                                                    bool
+	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr, attachErr error
+	createLands, opStuck, deleteHard                                                                                               bool
 
 	nextID      int
 	creates     int
@@ -35,6 +35,9 @@ type fakeAPI struct {
 	lists       int
 	lastCreate  client.CreateInstanceRequest
 	lastRenamed string
+	attaches    int
+	detaches    int
+	netOrder    []string // attach, detach and group changes, in the order sent
 }
 
 var errConnReset = errors.New("connection reset by peer")
@@ -206,6 +209,7 @@ func (f *fakeAPI) ResizeInstance(_ context.Context, id, planSlug string) (*clien
 // ChangeInstanceSecurityGroup behaves like the real backend: the instance must be stopped.
 func (f *fakeAPI) ChangeInstanceSecurityGroup(_ context.Context, id, securityGroupID string) (*client.OperationReference, error) {
 	f.groupSwaps++
+	f.netOrder = append(f.netOrder, "group")
 	if f.groupErr != nil {
 		return nil, f.groupErr
 	}
@@ -267,4 +271,33 @@ func (f *fakeAPI) settle(ctx context.Context, done client.DoneCheck) error {
 		return errors.New("never finished and the done check did not pass")
 	}
 	return nil
+}
+
+// AttachInstancePrivateNetwork gives the instance an interface and an address.
+func (f *fakeAPI) AttachInstancePrivateNetwork(_ context.Context, id string) (*client.OperationReference, error) {
+	f.attaches++
+	f.netOrder = append(f.netOrder, "attach")
+	if f.attachErr != nil {
+		return nil, f.attachErr
+	}
+	for i := range f.instances {
+		if f.instances[i].ID == id {
+			f.instances[i].PrivateNetworkState = client.PrivateNetworkAttached
+			f.instances[i].PrivateNetworkIP = ptr("10.250.0.7")
+		}
+	}
+	return &client.OperationReference{OperationID: "op_attach", ResourceID: id}, nil
+}
+
+// DetachInstancePrivateNetwork removes the interface and its address.
+func (f *fakeAPI) DetachInstancePrivateNetwork(_ context.Context, id string) (*client.OperationReference, error) {
+	f.detaches++
+	f.netOrder = append(f.netOrder, "detach")
+	for i := range f.instances {
+		if f.instances[i].ID == id {
+			f.instances[i].PrivateNetworkState = client.PrivateNetworkNone
+			f.instances[i].PrivateNetworkIP = nil
+		}
+	}
+	return &client.OperationReference{OperationID: "op_detach", ResourceID: id}, nil
 }

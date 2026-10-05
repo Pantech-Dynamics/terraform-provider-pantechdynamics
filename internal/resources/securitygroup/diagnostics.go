@@ -63,7 +63,7 @@ func addCreateError(diags *diag.Diagnostics, err error) {
 	addAPIError(diags, "Error creating security group", err)
 }
 
-// addDeleteError explains the two refusals a user can act on.
+// addDeleteError explains the refusals a user can act on.
 func addDeleteError(diags *diag.Diagnostics, err error) {
 	switch {
 	case client.HasCode(err, client.CodeDefaultSecurityGroupUndeletable):
@@ -72,6 +72,9 @@ func addDeleteError(diags *diag.Diagnostics, err error) {
 	case client.HasCode(err, client.CodeInvalidResourceState):
 		diags.AddError("Security group is still in use",
 			err.Error()+"\n\nAn instance still uses this group. Move those instances to another security group, or delete them, then try again.")
+	case client.HasCode(err, client.CodeSecurityGroupAttachedToDatabase):
+		diags.AddError("Security group is attached to a database",
+			err.Error()+"\n\nRemove the group from the database's security_group_ids (pantechdynamics_database) first, then try again.")
 	default:
 		addAPIError(diags, "Error deleting security group", err)
 	}

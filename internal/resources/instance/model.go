@@ -29,6 +29,8 @@ type model struct {
 	Zone            types.String   `tfsdk:"zone"`
 	PublicIPv4      types.String   `tfsdk:"public_ipv4"`
 	PrivateIPv4     types.String   `tfsdk:"private_ipv4"`
+	PrivateNetwork  types.Bool     `tfsdk:"private_network"`
+	PrivateNetIP    types.String   `tfsdk:"private_network_ip"`
 	CreatedAt       types.String   `tfsdk:"created_at"`
 	UpdatedAt       types.String   `tfsdk:"updated_at"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
@@ -94,6 +96,8 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		Zone:            types.StringValue(inst.Zone),
 		PublicIPv4:      types.StringPointerValue(inst.PublicIPv4),
 		PrivateIPv4:     types.StringPointerValue(inst.PrivateIPv4),
+		PrivateNetwork:  types.BoolValue(onPrivateNetwork(inst.PrivateNetworkState)),
+		PrivateNetIP:    types.StringPointerValue(inst.PrivateNetworkIP),
 		CreatedAt:       timestampValue(inst.CreatedAt),
 		UpdatedAt:       timestampValue(inst.UpdatedAt),
 		Timeouts:        prev.Timeouts,
@@ -124,10 +128,21 @@ func pendingModel(plan model, id string) model {
 		Zone:            types.StringNull(),
 		PublicIPv4:      types.StringNull(),
 		PrivateIPv4:     types.StringNull(),
+		PrivateNetwork:  pendingBool(plan.PrivateNetwork),
+		PrivateNetIP:    types.StringNull(),
 		CreatedAt:       types.StringNull(),
 		UpdatedAt:       types.StringNull(),
 		Timeouts:        plan.Timeouts,
 	}
+}
+
+// pendingBool is the configured value, or false while the API has not said:
+// a new instance starts without the interface.
+func pendingBool(v types.Bool) types.Bool {
+	if v.IsUnknown() || v.IsNull() {
+		return types.BoolValue(false)
+	}
+	return v
 }
 
 func nullIfUnknown(v types.String) types.String {

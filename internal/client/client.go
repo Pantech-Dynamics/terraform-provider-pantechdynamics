@@ -58,7 +58,7 @@ func WithMaxAttempts(n int) Option {
 func New(baseURL, apiKey, version string, opts ...Option) (*Client, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("invalid base URL %q: expected an http(s) URL such as https://api.example.com/v1", baseURL)
+		return nil, fmt.Errorf("invalid base URL %q: expected an http(s) URL such as https://api.pantechdynamics.com/public/v1", baseURL)
 	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key must not be empty")

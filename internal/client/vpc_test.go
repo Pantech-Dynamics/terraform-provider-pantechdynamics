@@ -130,36 +130,89 @@ func TestVPCReadsDecodeAndMapNotFound(t *testing.T) {
 	}
 }
 
-func TestRuleReadsFindByIDInEitherListShape(t *testing.T) {
+func TestRuleReadsUseTheSingleRuleEndpoints(t *testing.T) {
 	const rule = `{"id":"aclr_1","subnet_id":"snet_1","number":100,"direction":"ingress","protocol":"tcp","port_start":22,"port_end":22,"cidr":"0.0.0.0/0","action":"allow"}`
-	const fwd = `{"id":"pfr_1","public_ip_id":"pip_1","instance_id":"vm_1","protocol":"tcp","public_port_start":2222,"public_port_end":2222,"private_port_start":22,"private_port_end":22}`
+	const fwd = `{"id":"pfr_1","public_ip_id":"pip_1","instance_id":"vm_1","instance_name":"web","protocol":"tcp","public_port_start":2222,"public_port_end":2222,"private_port_start":22,"private_port_end":22}`
+	bodies := map[string]string{
+		"/v1/subnets/snet_1/firewall-rules/aclr_1":         rule,
+		"/v1/public-ips/pip_1/port-forwarding-rules/pfr_1": fwd,
+	}
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, ok := bodies[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(notFoundBody))
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	})
+	ctx := context.Background()
 
-	for _, shape := range []string{"rules", "data"} {
-		t.Run(shape, func(t *testing.T) {
-			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/firewall-rules") {
-					_, _ = w.Write([]byte(`{"` + shape + `":[` + rule + `],"system_rules":[]}`))
-					return
-				}
-				_, _ = w.Write([]byte(`{"` + shape + `":[` + fwd + `]}`))
-			})
-			ctx := context.Background()
+	fr, err := c.GetFirewallRule(ctx, "snet_1", "aclr_1")
+	if err != nil || fr.Number != 100 || fr.PortStart == nil || *fr.PortStart != 22 {
+		t.Fatalf("firewall rule = %+v, err %v", fr, err)
+	}
+	if _, err := c.GetFirewallRule(ctx, "snet_1", "aclr_other"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	pf, err := c.GetPortForwardingRule(ctx, "pip_1", "pfr_1")
+	if err != nil || pf.PrivatePortStart != 22 || pf.InstanceName == nil || *pf.InstanceName != "web" {
+		t.Fatalf("port forward = %+v, err %v", pf, err)
+	}
+	if _, err := c.GetPortForwardingRule(ctx, "pip_1", "pfr_other"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
 
-			fr, err := c.GetFirewallRule(ctx, "snet_1", "aclr_1")
-			if err != nil || fr.Number != 100 || fr.PortStart == nil || *fr.PortStart != 22 {
-				t.Fatalf("firewall rule = %+v, err %v", fr, err)
-			}
-			if _, err := c.GetFirewallRule(ctx, "snet_1", "aclr_other"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("err = %v, want ErrNotFound", err)
-			}
-			pf, err := c.GetPortForwardingRule(ctx, "pip_1", "pfr_1")
-			if err != nil || pf.PrivatePortStart != 22 {
-				t.Fatalf("port forward = %+v, err %v", pf, err)
-			}
-			if _, err := c.GetPortForwardingRule(ctx, "pip_1", "pfr_other"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("err = %v, want ErrNotFound", err)
-			}
-		})
+func TestRuleListsFollowTheCursorAndSkipSystemRules(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/firewall-rules") && r.URL.Query().Get("cursor") == "":
+			_, _ = w.Write([]byte(`{"data":[{"id":"aclr_1"}],"next_cursor":"c2","system_rules":[{"number":1}]}`))
+		case strings.HasSuffix(r.URL.Path, "/firewall-rules"):
+			_, _ = w.Write([]byte(`{"data":[{"id":"aclr_2"}],"next_cursor":null,"system_rules":[]}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":[{"id":"pfr_1"},{"id":"pfr_2"}],"next_cursor":null}`))
+		}
+	})
+	ctx := context.Background()
+	rules, err := c.ListFirewallRules(ctx, "snet_1")
+	if err != nil || len(rules) != 2 || rules[1].ID != "aclr_2" {
+		t.Fatalf("rules = %+v, err %v", rules, err)
+	}
+	fwds, err := c.ListPortForwardingRules(ctx, "pip_1")
+	if err != nil || len(fwds) != 2 {
+		t.Fatalf("forwards = %+v, err %v", fwds, err)
+	}
+}
+
+func TestListNetworksFollowsTheCursor(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/networks" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("cursor") == "" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"net_1","name":"main"}],"next_cursor":"p2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"net_2","name":"db"}],"next_cursor":null}`))
+	})
+	nets, err := c.ListNetworks(context.Background())
+	if err != nil || len(nets) != 2 || nets[1].Name != "db" {
+		t.Fatalf("networks = %+v, err %v", nets, err)
+	}
+}
+
+func TestPublicIPReadsZoneAndNames(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"pip_1","network_id":"net_1","network_name":"main","purpose":"static_nat","instance_id":"vm_1","instance_name":"web","region":"af-abj","zone":"af-abj-2","desired_state":"present","observed_state":"active"}`))
+	})
+	ip, err := c.GetPublicIP(context.Background(), "pip_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derefString(ip.Zone) != "af-abj-2" || derefString(ip.NetworkName) != "main" || derefString(ip.InstanceName) != "web" {
+		t.Errorf("public ip = %+v", ip)
 	}
 }
 

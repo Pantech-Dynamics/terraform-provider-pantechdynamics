@@ -81,6 +81,10 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 // addUpdateError explains the failures of a resize or a security group change
 // that a user can act on. A plan that is not bigger is the common one.
 func addUpdateError(diags *diag.Diagnostics, summary, id string, err error) {
+	if hint, ok := privateNetworkHint(err); ok {
+		diags.AddAttributeError(path.Root("security_group_id"), summary, err.Error()+"\n\n"+hint)
+		return
+	}
 	if client.HasFieldCode(err, "plan_slug", client.FieldCodePlanNotBigger) {
 		diags.AddAttributeError(path.Root("plan_slug"), "Instances can only be resized to a bigger plan",
 			"The platform refused the resize because the new plan is not bigger than the current one.\n\n"+
