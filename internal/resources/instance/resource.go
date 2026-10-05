@@ -176,7 +176,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 			},
 			"private_network": schema.BoolAttribute{
 				Description: "Whether the instance has a second network interface on its zone's private database network, so it can reach managed databases by their private address. Standard instances only (no subnet_id), in a zone that has the network. Changing it attaches or detaches the interface in place, without a restart, on a running or stopped instance. Omit it to leave the interface as it is. " +
-					"The instance's security group must let in nothing from the private network's range (10.250.0.0/20 in af-abj-1), including through 0.0.0.0/0 or ICMP rules, because a group applies to every interface: the API refuses the attach with SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK and names the rules to narrow, and while attached it refuses rule changes and group changes that would let the range in. " +
+					"The instance's security group must let in nothing from the private network's range (private_network_cidr of the zone's standard placement in pantechdynamics_region, 10.250.0.0/20 in af-abj-1 today), including through 0.0.0.0/0 or ICMP rules, because a group applies to every interface: the API refuses the attach with SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK and names the rules to narrow, and while attached it refuses rule changes and group changes that would let the range in. " +
 					"Inside the guest the interface stays down until configured: on Ubuntu add it to netplan with dhcp4: true and dhcp4-overrides {use-routes: false, use-dns: false}, then netplan apply.",
 				Optional:      true,
 				Computed:      true,

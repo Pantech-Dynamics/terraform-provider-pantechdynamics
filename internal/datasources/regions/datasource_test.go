@@ -40,9 +40,10 @@ func TestSchemaIsValid(t *testing.T) {
 
 func TestRead(t *testing.T) {
 	reason := "ACCOUNT_NOT_READY"
+	cidr := "10.250.0.0/20"
 	api := &fakeAPI{regions: []client.Region{
 		{Code: "af-abj", Name: "Abuja", Placements: []client.Placement{
-			{Kind: "standard", Zone: "af-abj-1", Available: true},
+			{Kind: "standard", Zone: "af-abj-1", Available: true, PrivateNetworkCIDR: &cidr},
 			{Kind: "vpc", Zone: "af-abj-2", Available: false, UnavailableReason: &reason},
 		}},
 		{Code: "eu-test", Name: "Nowhere"},
@@ -66,7 +67,10 @@ func TestRead(t *testing.T) {
 	if std.Kind.ValueString() != "standard" || !std.Available.ValueBool() || !std.UnavailableReason.IsNull() {
 		t.Fatalf("standard = %+v", std)
 	}
-	if vpc.Available.ValueBool() || vpc.UnavailableReason.ValueString() != reason {
+	if std.PrivateNetworkCIDR.ValueString() != cidr {
+		t.Fatalf("standard private_network_cidr = %v", std.PrivateNetworkCIDR)
+	}
+	if vpc.Available.ValueBool() || vpc.UnavailableReason.ValueString() != reason || !vpc.PrivateNetworkCIDR.IsNull() {
 		t.Fatalf("vpc = %+v", vpc)
 	}
 	if got.Regions[1].Placements == nil || len(got.Regions[1].Placements) != 0 {

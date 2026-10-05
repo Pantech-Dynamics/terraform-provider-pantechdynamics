@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
 )
 
 // settableFields are the attributes a 422 may point at. A field name the schema
@@ -49,7 +50,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 		diags.AddError(summary, "Stopped waiting for volume "+id+": "+err.Error()+
 			"\n\nThe change may still complete. Run `terraform refresh` to see the current state before applying again.")
 	default:
-		diags.AddError(summary, err.Error())
+		diags.AddError(summary, resourcekit.WithFailureHint(err))
 	}
 }
 
@@ -63,7 +64,7 @@ func addAttachError(diags *diag.Diagnostics, id, storageType string, err error) 
 		if storageType == "shared" {
 			hint = "\n\nThis volume's storage type is \"shared\". On the staging platform, attaching a shared volume to an instance failed in every test while a local volume attached. Try a disk offering whose storage_type is \"local\"."
 		}
-		diags.AddError("Error attaching the volume", err.Error()+hint+"\n\nThe volume "+id+" exists and is not attached. It can still be deleted.")
+		diags.AddError("Error attaching the volume", resourcekit.WithFailureHint(err)+hint+"\n\nThe volume "+id+" exists and is not attached. It can still be deleted.")
 		return
 	}
 	addWaitError(diags, "Error attaching the volume", id, err)

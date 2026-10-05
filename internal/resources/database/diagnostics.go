@@ -49,7 +49,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 		diags.AddError(summary, "Stopped waiting for database "+id+": "+err.Error()+
 			"\n\nThe order may still complete, and may already be paid for. Run `terraform refresh` to see the current state before applying again.")
 	default:
-		diags.AddError(summary, err.Error())
+		diags.AddError(summary, resourcekit.WithFailureHint(err))
 	}
 }
 

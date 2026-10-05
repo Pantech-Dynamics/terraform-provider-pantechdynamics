@@ -50,6 +50,10 @@ type Placement struct {
 	Zone              string  `json:"zone"`
 	Available         bool    `json:"available"`
 	UnavailableReason *string `json:"unavailable_reason"`
+	// PrivateNetworkCIDR is the zone's private database network range when a
+	// standard instance there can add a private network interface; nil
+	// otherwise, and always for "vpc".
+	PrivateNetworkCIDR *string `json:"private_network_cidr"`
 }
 
 // Region is a location, with where each kind of instance would land.

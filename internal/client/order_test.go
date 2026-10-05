@@ -51,6 +51,7 @@ func TestWaitForInstanceOrder(t *testing.T) {
 		{"awaiting payment then provisioned", []string{"awaiting_payment", "paid", "provisioning", "provisioned"}, "", 4, ""},
 		{"provisioning fails", []string{"awaiting_payment", "failed"}, "provisioning_handoff_failed", 2, "provisioning_handoff_failed"},
 		{"payment is declined", []string{"awaiting_payment", "payment_failed"}, "card_declined", 2, "payment was declined"},
+		{"payment expired", []string{"awaiting_payment", "payment_failed"}, "payment_expired", 2, "not paid within one hour"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

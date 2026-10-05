@@ -38,6 +38,17 @@ type engineModel struct {
 	DisplayName types.String   `tfsdk:"display_name"`
 	Port        types.Int64    `tfsdk:"port"`
 	Versions    []versionModel `tfsdk:"versions"`
+	Storage     []storageModel `tfsdk:"storage"`
+}
+
+type storageModel struct {
+	ZoneID               types.String `tfsdk:"zone_id"`
+	MinGB                types.Int64  `tfsdk:"min_gb"`
+	MinIsPlanDisk        types.Bool   `tfsdk:"min_is_plan_disk"`
+	MaxGB                types.Int64  `tfsdk:"max_gb"`
+	StepGB               types.Int64  `tfsdk:"step_gb"`
+	PricePerGBMonthMinor types.Int64  `tfsdk:"price_per_gb_month_minor"`
+	Currency             types.String `tfsdk:"currency"`
 }
 
 type versionModel struct {
@@ -73,9 +84,27 @@ func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp 
 							"zones":    schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Zones this version can be created in."},
 						}},
 					},
+					"storage": schema.ListNestedAttribute{
+						Description:  "Data disk sizes a new database of this engine may have, one entry per zone where it can be created and storage is offered. They bound storage_gb on pantechdynamics_database.",
+						Computed:     true,
+						NestedObject: schema.NestedAttributeObject{Attributes: storageAttributes()},
+					},
 				}},
 			},
 		},
+	}
+}
+
+// storageAttributes describes one zone's data disk limits and price.
+func storageAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"zone_id":                  schema.StringAttribute{Computed: true, Description: "The zone, for example \"af-abj-2\"."},
+		"min_gb":                   schema.Int64Attribute{Computed: true, Description: "Minimum data disk in GB. 0 means the plan's disk_gb is the minimum; otherwise the minimum is the larger of the plan's disk_gb and this value."},
+		"min_is_plan_disk":         schema.BoolAttribute{Computed: true, Description: "True when min_gb is 0, so the chosen plan's disk_gb is the minimum."},
+		"max_gb":                   schema.Int64Attribute{Computed: true, Description: "Largest data disk in GB."},
+		"step_gb":                  schema.Int64Attribute{Computed: true, Description: "Above the minimum, storage_gb must be a multiple of this."},
+		"price_per_gb_month_minor": schema.Int64Attribute{Computed: true, Description: "Price of one GB of data disk for a 730-hour month, in minor units of currency (kobo or cents). Null when the zone could not be priced."},
+		"currency":                 schema.StringAttribute{Computed: true, Description: "\"NGN\" or \"USD\". Null when not priced."},
 	}
 }
 
@@ -110,6 +139,7 @@ func fromAPIResponse(engines []client.DatabaseEngine) model {
 		em := engineModel{
 			Engine: types.StringValue(e.Engine), DisplayName: types.StringValue(e.DisplayName),
 			Port: types.Int64Value(e.Port), Versions: make([]versionModel, 0, len(e.Versions)),
+			Storage: fromAPIStorage(e.Storage),
 		}
 		for _, v := range e.Versions {
 			zones := v.Zones
@@ -123,4 +153,18 @@ func fromAPIResponse(engines []client.DatabaseEngine) model {
 		m.Engines = append(m.Engines, em)
 	}
 	return m
+}
+
+// fromAPIStorage maps the per-zone storage limits. Never null, like versions.
+func fromAPIStorage(options []client.DatabaseStorageOption) []storageModel {
+	out := make([]storageModel, 0, len(options))
+	for _, o := range options {
+		out = append(out, storageModel{
+			ZoneID: types.StringValue(o.ZoneID), MinGB: types.Int64Value(o.MinGB),
+			MinIsPlanDisk: types.BoolValue(o.MinIsPlanDisk), MaxGB: types.Int64Value(o.MaxGB),
+			StepGB: types.Int64Value(o.StepGB), PricePerGBMonthMinor: types.Int64PointerValue(o.PricePerGBMonthMinor),
+			Currency: types.StringPointerValue(o.Currency),
+		})
+	}
+	return out
 }
