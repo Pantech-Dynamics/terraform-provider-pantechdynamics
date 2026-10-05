@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // Sentinel errors let callers branch with errors.Is, much like catching a
@@ -66,7 +67,7 @@ func (e *APIError) Error() string {
 	if e.Code != "" {
 		msg += " " + e.Code
 	}
-	if e.Detail != "" {
+	if e.Detail != "" && !e.detailRepeatsFields() {
 		msg += ": " + e.Detail
 	} else if e.Title != "" {
 		msg += ": " + e.Title
@@ -81,6 +82,36 @@ func (e *APIError) Error() string {
 		msg += ". Check base_url: it must include the /public/v1 prefix, for example https://api.pantechdynamics.com/public/v1"
 	}
 	return msg
+}
+
+// genericValidationDetail is the placeholder detail older backends sent on a
+// 422. It says nothing the field list does not.
+const genericValidationDetail = "One or more fields are invalid."
+
+// detailRepeatsFields reports whether the detail says nothing beyond the field
+// errors listed after it: the generic placeholder, or the "field: message;
+// field2: message." text the backend now builds from those same errors.
+// Printing both would show every field twice.
+func (e *APIError) detailRepeatsFields() bool {
+	if len(e.Errors) == 0 {
+		return false
+	}
+	return e.Detail == genericValidationDetail || e.Detail == validationDetail(e.Errors)
+}
+
+// validationDetail mirrors how the backend builds a 422 detail from its field
+// errors (cloud internal/platform/problem.ValidationDetail).
+func validationDetail(fields []FieldError) string {
+	parts := make([]string, 0, len(fields))
+	for _, fe := range fields {
+		message := strings.TrimSuffix(strings.TrimSpace(fe.Message), ".")
+		if fe.Field == "" {
+			parts = append(parts, message)
+			continue
+		}
+		parts = append(parts, fe.Field+": "+message)
+	}
+	return strings.Join(parts, "; ") + "."
 }
 
 // Is maps backend codes to the sentinel errors. It branches on the problem

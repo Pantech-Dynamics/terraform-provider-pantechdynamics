@@ -203,7 +203,7 @@ func TestListDatabasesAndEngines(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/database-engines":
-			_, _ = w.Write([]byte(`{"data":[{"engine":"postgresql","display_name":"PostgreSQL","port":5432,"versions":[{"version":"18","eol_date":"2030-11-14","zones":["af-abj-1","af-abj-2"]}]}],"next_cursor":null}`))
+			_, _ = w.Write([]byte(`{"data":[{"engine":"postgresql","display_name":"PostgreSQL","port":5432,"versions":[{"version":"18","eol_date":"2030-11-14","zones":["af-abj-1","af-abj-2"]}],"storage":[{"zone_id":"af-abj-1","min_gb":0,"min_is_plan_disk":true,"max_gb":2000,"step_gb":10,"price_per_gb_month_minor":14600,"currency":"NGN"},{"zone_id":"af-abj-2","min_gb":0,"min_is_plan_disk":true,"max_gb":2000,"step_gb":10,"price_per_gb_month_minor":null,"currency":null}]}],"next_cursor":null}`))
 		case r.URL.Query().Get("cursor") == "":
 			_, _ = w.Write([]byte(`{"data":[` + databaseJSON + `],"next_cursor":"p2"}`))
 		default:
@@ -213,6 +213,10 @@ func TestListDatabasesAndEngines(t *testing.T) {
 	engines, err := c.ListDatabaseEngines(context.Background())
 	if err != nil || len(engines) != 1 || engines[0].Port != 5432 || len(engines[0].Versions[0].Zones) != 2 {
 		t.Fatalf("engines = %+v, err = %v", engines, err)
+	}
+	if st := engines[0].Storage; len(st) != 2 || st[0].StepGB != 10 || st[0].MaxGB != 2000 || !st[0].MinIsPlanDisk ||
+		st[0].PricePerGBMonthMinor == nil || *st[0].PricePerGBMonthMinor != 14600 || st[1].PricePerGBMonthMinor != nil || st[1].Currency != nil {
+		t.Fatalf("storage = %+v", st)
 	}
 	dbs, err := c.ListDatabases(context.Background())
 	if err != nil || len(dbs) != 2 || dbs[1].ID != "db_2" {
@@ -242,6 +246,9 @@ func TestWaitForDatabaseOrder(t *testing.T) {
 		{"provisioned after payment", []string{"awaiting_payment", "paid", "provisioning", "provisioned"}, "", ""},
 		{"payment failed", []string{"awaiting_payment", "payment_failed"}, "card_declined", "card_declined"},
 		{"name taken", []string{"paid", "failed"}, "database_name_taken", "returned to your credit"},
+		{"payment expired", []string{"awaiting_payment", "payment_failed"}, "payment_expired", "not paid within one hour"},
+		{"organization deleted before payment", []string{"awaiting_payment", "payment_failed"}, "organization_deleted", "organization was deleted"},
+		{"organization deleted after payment", []string{"paid", "failed"}, "organization_deleted", "returned to credit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

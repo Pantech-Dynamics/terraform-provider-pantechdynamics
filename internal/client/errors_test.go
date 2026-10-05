@@ -49,6 +49,28 @@ func TestNewAPIErrorValidationFields(t *testing.T) {
 	}
 }
 
+// The backend builds a 422 detail from the field errors, so printing the
+// detail and the field list would name every field twice.
+func TestAPIErrorValidationDetailIsNotRepeated(t *testing.T) {
+	tests := []struct {
+		name, body, want string
+	}{
+		{"detail built from the fields", `{"status":422,"code":"VALIDATION_FAILED","title":"Validation failed","detail":"storage_gb: must be a multiple of 10 GB; name: is required.","errors":[{"field":"storage_gb","code":"INVALID_DATABASE_STORAGE","message":"must be a multiple of 10 GB."},{"field":"name","code":"REQUIRED","message":"is required"}]}`,
+			"API error 422 VALIDATION_FAILED: Validation failed; storage_gb: must be a multiple of 10 GB. (INVALID_DATABASE_STORAGE); name: is required (REQUIRED)"},
+		{"generic placeholder", `{"status":422,"code":"VALIDATION_FAILED","title":"Validation failed","detail":"One or more fields are invalid.","errors":[{"field":"name","code":"REQUIRED","message":"is required"}]}`,
+			"API error 422 VALIDATION_FAILED: Validation failed; name: is required (REQUIRED)"},
+		{"a detail of its own is kept", `{"status":422,"code":"VALIDATION_FAILED","title":"Validation failed","detail":"The plan is not offered in this zone.","errors":[{"field":"plan_slug","code":"PLAN_NOT_FOUND","message":"is not offered"}]}`,
+			"API error 422 VALIDATION_FAILED: The plan is not offered in this zone.; plan_slug: is not offered (PLAN_NOT_FOUND)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := newAPIError(422, []byte(tt.body)).Error(); got != tt.want {
+				t.Fatalf("Error() = %q\nwant      %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAPIErrorIs(t *testing.T) {
 	tests := []struct {
 		name         string

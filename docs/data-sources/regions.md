@@ -49,5 +49,6 @@ Read-Only:
 
 - `available` (Boolean) Whether your account can create an instance of this kind here now.
 - `kind` (String) "standard" is a VPS with a public IP on the shared network. "vpc" is a VM in a customer VPC.
+- `private_network_cidr` (String) Range of the zone's private database network, for example "10.250.0.0/20", when a standard instance there can add a private network interface (private_network on pantechdynamics_instance). Null otherwise, and always for "vpc". The security group of an instance with that interface must allow nothing from this range.
 - `unavailable_reason` (String) Why it is unavailable, or null when available.
 - `zone` (String) Zone where a new instance of this kind lands. Check an image's zones against it.

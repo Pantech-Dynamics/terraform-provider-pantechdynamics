@@ -279,7 +279,7 @@ func TestCreate(t *testing.T) {
 		resp := create(api, instanceSource)
 
 		text := errorText(resp.Diagnostics)
-		if !strings.Contains(text, "PROVISIONING_JOB_FAILED") || !strings.Contains(text, "stopped instance") || !strings.Contains(text, "deletes it and tries again") || !strings.Contains(text, "SNAPSHOT_NAME_TAKEN") {
+		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, "stopped instance") || !strings.Contains(text, "deletes it and tries again") || !strings.Contains(text, "SNAPSHOT_NAME_TAKEN") {
 			t.Fatalf("diags = %s", text)
 		}
 		if n := strings.Count(text, "On the staging platform"); n != 1 {

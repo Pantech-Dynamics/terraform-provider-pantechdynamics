@@ -44,6 +44,33 @@ type InstanceOrder struct {
 	UpdatedAt   *time.Time `json:"updated_at"`
 }
 
+// Order failure codes with their own explanation. Others are shown as the
+// backend sends them.
+const (
+	// OrderFailurePaymentExpired: the order was not paid within one hour.
+	OrderFailurePaymentExpired = "payment_expired"
+	// OrderFailureOrganizationDeleted: the order was cancelled because its
+	// organization was deleted. It ends payment_failed when it was still
+	// awaiting payment, or failed when it had been paid (the payment is
+	// returned to credit).
+	OrderFailureOrganizationDeleted = "organization_deleted"
+)
+
+// orderFailureExplanation says what a known order failure code means, or ""
+// for any other code.
+func orderFailureExplanation(code *string) string {
+	if code == nil {
+		return ""
+	}
+	switch *code {
+	case OrderFailurePaymentExpired:
+		return "the order was not paid within one hour and expired, nothing was provisioned"
+	case OrderFailureOrganizationDeleted:
+		return "the order was cancelled because its organization was deleted, nothing was provisioned and any payment taken is returned to credit"
+	}
+	return ""
+}
+
 // OrderError is returned when an order ends in a failed state.
 type OrderError struct {
 	Order InstanceOrder
@@ -56,7 +83,10 @@ func (e *OrderError) Error() string {
 	if e.Order.FailureCode != nil && *e.Order.FailureCode != "" {
 		msg += " (" + *e.Order.FailureCode + ")"
 	}
-	if e.Order.Status == OrderPaymentFailed {
+	switch explanation := orderFailureExplanation(e.Order.FailureCode); {
+	case explanation != "":
+		msg += ": " + explanation
+	case e.Order.Status == OrderPaymentFailed:
 		msg += ": the payment was declined, nothing was provisioned"
 	}
 	return msg

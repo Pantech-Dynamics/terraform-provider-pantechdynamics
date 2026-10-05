@@ -62,7 +62,7 @@ func (f *fakeAPI) create(instanceID, volumeID, name string) (*client.OperationRe
 		s.ObservedState, s.SizeBytes, s.CompletedAt = client.SnapshotFailed, 0, nil
 		f.failNext = false
 		f.pendingOpErr = &client.OperationError{Operation: client.Operation{ID: "op_snap", Kind: "create_snapshot", Status: "failed",
-			Failure: &client.OperationFailure{Code: "PROVISIONING_JOB_FAILED", Reason: "the provider reported job failure"}}}
+			Failure: &client.OperationFailure{Code: "PROVISIONING_FAILED", Reason: "We couldn't complete this change. Try again; if it keeps failing, contact support with the operation id."}}}
 	}
 	f.snaps = append(f.snaps, s)
 	if f.createErr != nil {

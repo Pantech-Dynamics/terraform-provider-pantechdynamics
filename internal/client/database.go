@@ -40,12 +40,26 @@ type DatabaseEngineVersion struct {
 	Zones   []string `json:"zones"`
 }
 
+// DatabaseStorageOption is one zone's allowed data disk sizes for a new or
+// grown database, and the price per GB. MinGB 0 means the plan's disk_gb is
+// the minimum. The price and currency are nil when the zone is not priced.
+type DatabaseStorageOption struct {
+	ZoneID               string  `json:"zone_id"`
+	MinGB                int64   `json:"min_gb"`
+	MinIsPlanDisk        bool    `json:"min_is_plan_disk"`
+	MaxGB                int64   `json:"max_gb"`
+	StepGB               int64   `json:"step_gb"`
+	PricePerGBMonthMinor *int64  `json:"price_per_gb_month_minor"`
+	Currency             *string `json:"currency"`
+}
+
 // DatabaseEngine is an engine offered for new databases.
 type DatabaseEngine struct {
 	Engine      string                  `json:"engine"`
 	DisplayName string                  `json:"display_name"`
 	Port        int64                   `json:"port"`
 	Versions    []DatabaseEngineVersion `json:"versions"`
+	Storage     []DatabaseStorageOption `json:"storage"`
 }
 
 // DatabaseAccessRule allows TCP to the engine's port from one IPv4 CIDR.
@@ -170,9 +184,12 @@ func (e *DatabaseOrderError) Error() string {
 	if e.Order.FailureCode != nil && *e.Order.FailureCode != "" {
 		msg += " (" + *e.Order.FailureCode + ")"
 	}
-	if e.Order.Status == OrderPaymentFailed {
+	switch explanation := orderFailureExplanation(e.Order.FailureCode); {
+	case explanation != "":
+		msg += ": " + explanation
+	case e.Order.Status == OrderPaymentFailed:
 		msg += ": the payment was not taken, nothing was provisioned"
-	} else {
+	default:
 		msg += ": any payment taken is returned to your credit"
 	}
 	return msg

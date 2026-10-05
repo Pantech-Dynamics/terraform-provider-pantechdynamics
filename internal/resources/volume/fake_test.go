@@ -135,7 +135,7 @@ func (f *fakeAPI) RestoreSnapshot(_ context.Context, snapshotID, name, offering 
 	if f.restoreFails {
 		v.ObservedState = client.VolumeFailed
 		f.pendingOpErr = &client.OperationError{Operation: client.Operation{ID: "op_restore", Kind: "create_volume", Status: "failed",
-			Failure: &client.OperationFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "creating volume: PROVISIONING_REQUEST_FAILED: the provider request failed"}}}
+			Failure: &client.OperationFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "We couldn't complete this change after several attempts, and it will not be retried automatically. Please try again, and contact support with the operation ID if it keeps failing."}}}
 	}
 	f.volumes = append(f.volumes, v)
 	return &client.OperationReference{OperationID: "op_restore", ResourceID: id, Status: client.OperationSubmitting}, nil
@@ -206,7 +206,7 @@ func (f *fakeAPI) AttachVolume(_ context.Context, id, instanceID string) (*clien
 	v.DesiredInstanceID = ptr(instanceID)
 	if v.StorageType != nil && *v.StorageType == "shared" {
 		f.pendingOpErr = &client.OperationError{Operation: client.Operation{ID: "op_attach", Kind: "attach_volume", Status: "failed",
-			Failure: &client.OperationFailure{Code: "PROVISIONING_JOB_FAILED", Reason: "the provider reported job failure"}}}
+			Failure: &client.OperationFailure{Code: "PROVISIONING_FAILED", Reason: "We couldn't complete this change. Try again; if it keeps failing, contact support with the operation id."}}}
 	} else {
 		v.AttachedInstanceID = ptr(instanceID)
 	}
@@ -223,7 +223,7 @@ func (f *fakeAPI) DetachVolume(_ context.Context, id string) (*client.OperationR
 		f.redundantDetaches++
 		v.DesiredInstanceID = nil // harmless, and it clears the stale intent
 		f.pendingOpErr = &client.OperationError{Operation: client.Operation{ID: "op_detach", Kind: "detach_volume", Status: "failed",
-			Failure: &client.OperationFailure{Code: "PROVISIONING_JOB_FAILED", Reason: "the provider reported job failure"}}}
+			Failure: &client.OperationFailure{Code: "PROVISIONING_FAILED", Reason: "We couldn't complete this change. Try again; if it keeps failing, contact support with the operation id."}}}
 	} else {
 		v.AttachedInstanceID, v.DesiredInstanceID = nil, nil
 	}

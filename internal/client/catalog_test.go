@@ -75,7 +75,7 @@ func TestListRegions(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{"data":[{"code":"af-abj","name":"Abuja","placements":[
-			{"kind":"standard","zone":"af-abj-1","available":true,"unavailable_reason":null},
+			{"kind":"standard","zone":"af-abj-1","available":true,"unavailable_reason":null,"private_network_cidr":"10.250.0.0/20"},
 			{"kind":"vpc","zone":"af-abj-2","available":false,"unavailable_reason":"ACCOUNT_NOT_READY"}]}],"next_cursor":null}`))
 	})
 
@@ -87,10 +87,10 @@ func TestListRegions(t *testing.T) {
 		t.Fatalf("regions = %+v", regions)
 	}
 	std, vpc := regions[0].Placements[0], regions[0].Placements[1]
-	if std.Kind != PlacementStandard || !std.Available || std.UnavailableReason != nil {
+	if std.Kind != PlacementStandard || !std.Available || std.UnavailableReason != nil || std.PrivateNetworkCIDR == nil || *std.PrivateNetworkCIDR != "10.250.0.0/20" {
 		t.Fatalf("standard = %+v", std)
 	}
-	if vpc.Kind != PlacementVPC || vpc.Available || vpc.UnavailableReason == nil || *vpc.UnavailableReason != "ACCOUNT_NOT_READY" {
+	if vpc.Kind != PlacementVPC || vpc.Available || vpc.UnavailableReason == nil || *vpc.UnavailableReason != "ACCOUNT_NOT_READY" || vpc.PrivateNetworkCIDR != nil {
 		t.Fatalf("vpc = %+v", vpc)
 	}
 }
