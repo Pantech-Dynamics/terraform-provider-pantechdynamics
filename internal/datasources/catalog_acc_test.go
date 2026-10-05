@@ -144,3 +144,78 @@ func TestAccDiskOfferingsDataSource(t *testing.T) {
 		},
 	})
 }
+
+// The single-item lookups read the same catalog, so they also cost nothing.
+func TestAccSingleCatalogDataSources(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { preCheck(t) },
+		ProtoV6ProviderFactories: protoV6Factories,
+		Steps: []resource.TestStep{
+			// Failures first, because the final destroy step reuses the last
+			// config, which must therefore be a valid one.
+			{
+				Config:      `data "pantechdynamics_plan" "x" { slug = "indivdual" }`,
+				ExpectError: regexp.MustCompile(`Plan not found`),
+			},
+			{
+				Config:      `data "pantechdynamics_image" "x" { slug = "no-such-image" }`,
+				ExpectError: regexp.MustCompile(`Image not found`),
+			},
+			{
+				Config:      `data "pantechdynamics_region" "x" { code = "af-nowhere" }`,
+				ExpectError: regexp.MustCompile(`Region not found`),
+			},
+			{
+				Config: `
+data "pantechdynamics_plan" "x" {
+  slug = "individual"
+}
+data "pantechdynamics_plan" "vpc" {
+  slug      = "individual"
+  placement = "vpc"
+}
+data "pantechdynamics_image" "x" {
+  slug = "ubuntu-24-04"
+}
+data "pantechdynamics_region" "x" {
+  code = "af-abj"
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.pantechdynamics_plan.x", "slug", "individual"),
+					resource.TestMatchResourceAttr("data.pantechdynamics_plan.x", "id", regexp.MustCompile(`.+`)),
+					resource.TestCheckResourceAttrSet("data.pantechdynamics_plan.x", "vcpu"),
+					resource.TestCheckResourceAttrSet("data.pantechdynamics_plan.x", "initial_payment_minor"),
+					resource.TestCheckResourceAttr("data.pantechdynamics_plan.vpc", "placement", "vpc"),
+					resource.TestCheckResourceAttr("data.pantechdynamics_image.x", "slug", "ubuntu-24-04"),
+					resource.TestCheckResourceAttrSet("data.pantechdynamics_image.x", "zones.#"),
+					resource.TestCheckResourceAttr("data.pantechdynamics_region.x", "id", "af-abj"),
+					resource.TestCheckResourceAttrSet("data.pantechdynamics_region.x", "placements.0.zone"),
+				),
+			},
+		},
+	})
+}
+
+// request_timeout in the provider block is accepted, and a bad one stops the run.
+func TestAccProviderRequestTimeout(t *testing.T) {
+	const regions = `data "pantechdynamics_regions" "all" {}`
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { preCheck(t) },
+		ProtoV6ProviderFactories: protoV6Factories,
+		Steps: []resource.TestStep{
+			{
+				Config:      `provider "pantechdynamics" { request_timeout = "90" }` + "\n" + regions,
+				ExpectError: regexp.MustCompile(`Invalid request_timeout`),
+			},
+			{
+				Config:      `provider "pantechdynamics" { request_timeout = "0s" }` + "\n" + regions,
+				ExpectError: regexp.MustCompile(`Invalid request_timeout`),
+			},
+			{
+				Config: `provider "pantechdynamics" { request_timeout = "90s" }` + "\n" + regions,
+				Check:  resource.TestCheckResourceAttr("data.pantechdynamics_regions.all", "id", "regions"),
+			},
+		},
+	})
+}

@@ -1,0 +1,1 @@
+terraform import pantechdynamics_network.main net_06ggex04xhtv9dmbw720cejcwc

@@ -18,6 +18,7 @@ type model struct {
 	SizeGB           types.Int64    `tfsdk:"size_gb"`
 	Region           types.String   `tfsdk:"region"`
 	InstanceID       types.String   `tfsdk:"instance_id"`
+	SourceSnapshotID types.String   `tfsdk:"source_snapshot_id"`
 	MountPoint       types.String   `tfsdk:"mount_point"`
 	StorageType      types.String   `tfsdk:"storage_type"`
 	Zone             types.String   `tfsdk:"zone"`
@@ -68,6 +69,7 @@ func fromAPIResponse(prev model, v *client.Volume) model {
 		SizeGB:           types.Int64Value(v.SizeGB),
 		Region:           types.StringPointerValue(v.Region),
 		InstanceID:       types.StringPointerValue(v.AttachedInstanceID),
+		SourceSnapshotID: types.StringPointerValue(v.SourceSnapshotID),
 		MountPoint:       types.StringPointerValue(v.MountPoint),
 		StorageType:      types.StringPointerValue(v.StorageType),
 		Zone:             types.StringPointerValue(v.Zone),
@@ -96,6 +98,7 @@ func pendingModel(plan model, id string) model {
 		SizeGB:           nullIfUnknownInt(plan.SizeGB),
 		Region:           nullIfUnknown(plan.Region),
 		InstanceID:       types.StringNull(), // not attached yet
+		SourceSnapshotID: nullIfUnknown(plan.SourceSnapshotID),
 		MountPoint:       nullIfUnknown(plan.MountPoint),
 		StorageType:      types.StringNull(),
 		Zone:             types.StringNull(),

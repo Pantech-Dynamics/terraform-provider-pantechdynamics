@@ -15,7 +15,7 @@ import (
 // reported as one general error.
 var settableFields = map[string]bool{
 	"name": true, "disk_offering_slug": true, "size_gb": true,
-	"region": true, "mount_point": true, "instance_id": true,
+	"region": true, "mount_point": true, "instance_id": true, "source_snapshot_id": true,
 }
 
 // addAPIError reports a client error. A 422 whose fields the schema has points at

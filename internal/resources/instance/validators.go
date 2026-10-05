@@ -7,7 +7,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // hostnameLabel is an RFC 1123 label: letters, digits and hyphens, not starting
@@ -60,5 +63,21 @@ func (v oneOf) ValidateString(_ context.Context, req validator.StringRequest, re
 	if !slices.Contains(v.allowed, req.ConfigValue.ValueString()) {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid value",
 			fmt.Sprintf("Expected one of %s, got %q.", strings.Join(v.allowed, ", "), req.ConfigValue.ValueString()))
+	}
+}
+
+// ValidateConfig rejects a security group on a VPC instance. The platform
+// refuses it (SECURITY_GROUPS_NOT_SUPPORTED_IN_ZONE) only after the order is
+// placed, and a refused order can still reserve credit, so it stops at plan time.
+func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var subnet, group types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subnet_id"), &subnet)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("security_group_id"), &group)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !subnet.IsNull() && !group.IsNull() {
+		resp.Diagnostics.AddAttributeError(path.Root("security_group_id"), "security_group_id not allowed in a VPC",
+			"An instance in a subnet is protected by the subnet's firewall rules, not a security group. Remove security_group_id, or remove subnet_id for a standard instance.")
 	}
 }

@@ -47,25 +47,29 @@ func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp 
 				Computed:    true,
 			},
 			"regions": schema.ListNestedAttribute{
-				Description: "The regions.",
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"code": schema.StringAttribute{Computed: true, Description: "Short code of the region, for example af-abj."},
-						"name": schema.StringAttribute{Computed: true, Description: "Display name of the region."},
-						"placements": schema.ListNestedAttribute{
-							Computed:    true,
-							Description: "Where each kind of instance lands in this region. A kind the region does not offer is absent.",
-							NestedObject: schema.NestedAttributeObject{
-								Attributes: map[string]schema.Attribute{
-									"kind":               schema.StringAttribute{Computed: true, Description: "\"standard\" is a VPS with a public IP on the shared network. \"vpc\" is a VM in a customer VPC."},
-									"zone":               schema.StringAttribute{Computed: true, Description: "Zone where a new instance of this kind lands. Check an image's zones against it."},
-									"available":          schema.BoolAttribute{Computed: true, Description: "Whether your account can create an instance of this kind here now."},
-									"unavailable_reason": schema.StringAttribute{Computed: true, Description: "Why it is unavailable, or null when available."},
-								},
-							},
-						},
-					},
+				Description:  "The regions.",
+				Computed:     true,
+				NestedObject: schema.NestedAttributeObject{Attributes: regionAttributes()},
+			},
+		},
+	}
+}
+
+// regionAttributes describes one region. The list and the single-region data
+// source share it, so a region reads the same in both.
+func regionAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"code": schema.StringAttribute{Computed: true, Description: "Short code of the region, for example af-abj."},
+		"name": schema.StringAttribute{Computed: true, Description: "Display name of the region."},
+		"placements": schema.ListNestedAttribute{
+			Computed:    true,
+			Description: "Where each kind of instance lands in this region. A kind the region does not offer is absent.",
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: map[string]schema.Attribute{
+					"kind":               schema.StringAttribute{Computed: true, Description: "\"standard\" is a VPS with a public IP on the shared network. \"vpc\" is a VM in a customer VPC."},
+					"zone":               schema.StringAttribute{Computed: true, Description: "Zone where a new instance of this kind lands. Check an image's zones against it."},
+					"available":          schema.BoolAttribute{Computed: true, Description: "Whether your account can create an instance of this kind here now."},
+					"unavailable_reason": schema.StringAttribute{Computed: true, Description: "Why it is unavailable, or null when available."},
 				},
 			},
 		},

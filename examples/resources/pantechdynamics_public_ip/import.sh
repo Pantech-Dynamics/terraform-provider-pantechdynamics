@@ -1,0 +1,1 @@
+terraform import pantechdynamics_public_ip.web pip_06ggex1abcdefghjkmnpqrstvw

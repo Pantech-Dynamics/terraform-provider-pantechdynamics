@@ -52,9 +52,10 @@ type instanceAPI interface {
 }
 
 var (
-	_ resource.Resource                = &Resource{}
-	_ resource.ResourceWithConfigure   = &Resource{}
-	_ resource.ResourceWithImportState = &Resource{}
+	_ resource.Resource                   = &Resource{}
+	_ resource.ResourceWithConfigure      = &Resource{}
+	_ resource.ResourceWithImportState    = &Resource{}
+	_ resource.ResourceWithValidateConfig = &Resource{}
 )
 
 // Resource manages one instance.
@@ -119,6 +120,22 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Optional:      true,
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"subnet_id": schema.StringAttribute{
+				Description: "Id of the VPC subnet to place the instance in, from pantechdynamics_subnet. A VPC instance has only a private address: attach a pantechdynamics_public_ip to reach it from outside. It cannot use a security group, because the subnet's firewall rules apply instead. Omit it for a standard instance. Changing it replaces the instance.",
+				Optional:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"network_id": schema.StringAttribute{
+				Description: "Id of the VPC network the instance is in. It follows from subnet_id, so it is normally left unset. Changing it replaces the instance.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
 			},
 			"tags": schema.MapAttribute{
 				Description: "Free-form key and value labels. Changing them replaces the instance.",

@@ -95,7 +95,7 @@ func TestPlaceVolume(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := placeVolume(ctx, tt.api, req)
+			got, err := placeVolume(ctx, tt.api, req, "")
 
 			if tt.api.creates != tt.wantCreates {
 				t.Fatalf("creates = %d, want %d: an order must never be re-sent", tt.api.creates, tt.wantCreates)

@@ -28,8 +28,11 @@ type fakeAPI struct {
 
 	pendingOpErr error // returned by the next WaitForOperation, for example a failed operation
 
-	nextID, creates, attaches, detaches, redundantDetaches, resizes, deletes, refused int
-	lastCreate                                                                        client.CreateVolumeRequest
+	restoreFails bool // a restore ends with a failed volume, as every restore did on staging
+
+	nextID, creates, restores, attaches, detaches, redundantDetaches, resizes, deletes, refused int
+	lastRestore                                                                                 restoreCall
+	lastCreate                                                                                  client.CreateVolumeRequest
 }
 
 var errConnReset = errors.New("connection reset by peer")
@@ -103,6 +106,39 @@ func (f *fakeAPI) CreateVolume(_ context.Context, req client.CreateVolumeRequest
 		return nil, f.createErr
 	}
 	return &client.OperationReference{OperationID: "op_create", ResourceID: id, Status: client.OperationSubmitting}, nil
+}
+
+// restoreCall records the arguments of the last RestoreSnapshot.
+type restoreCall struct {
+	snapshotID, name, offering string
+	sizeGB                     int64
+}
+
+// RestoreSnapshot creates a volume from a snapshot. With restoreFails it behaves
+// as staging did: the volume exists, ends failed, and the operation reports it.
+func (f *fakeAPI) RestoreSnapshot(_ context.Context, snapshotID, name, offering string, sizeGB int64) (*client.OperationReference, error) {
+	f.restores++
+	f.lastRestore = restoreCall{snapshotID, name, offering, sizeGB}
+	f.nextID++
+	id := fmt.Sprintf("vol_%d", f.nextID)
+	size, storage := sizeGB, "shared"
+	for _, o := range f.offerings {
+		if o.Slug == offering {
+			storage = o.StorageType
+			if o.SizeGB != nil {
+				size = *o.SizeGB
+			}
+		}
+	}
+	v := volume(id, name, offering, size, storage)
+	v.SourceSnapshotID = ptr(snapshotID)
+	if f.restoreFails {
+		v.ObservedState = client.VolumeFailed
+		f.pendingOpErr = &client.OperationError{Operation: client.Operation{ID: "op_restore", Kind: "create_volume", Status: "failed",
+			Failure: &client.OperationFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "creating volume: PROVISIONING_REQUEST_FAILED: the provider request failed"}}}
+	}
+	f.volumes = append(f.volumes, v)
+	return &client.OperationReference{OperationID: "op_restore", ResourceID: id, Status: client.OperationSubmitting}, nil
 }
 
 func (f *fakeAPI) GetVolume(_ context.Context, id string) (*client.Volume, error) {
