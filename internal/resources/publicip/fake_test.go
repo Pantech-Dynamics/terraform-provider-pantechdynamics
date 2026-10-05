@@ -44,7 +44,7 @@ func (f *fakeAPI) CreatePublicIP(_ context.Context, req client.CreatePublicIPReq
 		state = "active"
 	}
 	ip := client.PublicIP{
-		ID: id, NetworkID: req.NetworkID, Purpose: req.Purpose, Address: ptr("203.0.113.9"), Region: ptr("af-abj"), ZoneID: ptr("af-abj-2"),
+		ID: id, NetworkID: req.NetworkID, Purpose: req.Purpose, Address: ptr("203.0.113.9"), Region: ptr("af-abj"), Zone: ptr("af-abj-2"), NetworkName: ptr("main"),
 		DesiredState: "present", ObservedState: state, CreatedAt: now(), UpdatedAt: now(),
 	}
 	if req.InstanceID != "" {

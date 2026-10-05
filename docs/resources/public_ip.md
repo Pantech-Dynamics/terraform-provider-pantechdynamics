@@ -50,6 +50,8 @@ resource "pantechdynamics_public_ip" "gateway" {
 - `address` (String) The public IPv4 address.
 - `created_at` (String) When the address was allocated, in RFC 3339 UTC, to the second.
 - `id` (String) Identifier of the public IP, starting with pip_.
+- `instance_name` (String) Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding.
+- `network_name` (String) Name of the VPC network the address is for, as the platform reports it.
 - `observed_state` (String) State of the address as the platform sees it, for example "active".
 - `region` (String) Region the address lives in.
 - `updated_at` (String) When the address was last changed, in RFC 3339 UTC, to the second.

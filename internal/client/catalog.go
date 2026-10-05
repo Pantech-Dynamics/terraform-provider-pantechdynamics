@@ -2,9 +2,7 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 )
 
@@ -13,11 +11,6 @@ const (
 	PlacementStandard = "standard"
 	PlacementVPC      = "vpc"
 )
-
-// errUnexpectedPagination means a catalog list returned a cursor. The backend
-// documents these lists as unpaginated, so a cursor would mean entries are
-// missing. Failing loudly beats silently returning a truncated catalog.
-var errUnexpectedPagination = errors.New("catalog list returned a next_cursor, but catalog lists are documented as unpaginated")
 
 // PlanPrice is a plan's price in the account's currency, in minor units. It is
 // an estimate from a display-only cache, not a quote.
@@ -78,12 +71,6 @@ type DiskOffering struct {
 	HourlyPriceMinor int64  `json:"hourly_price_minor"`
 }
 
-// catalogPage is the envelope shared by the catalog lists.
-type catalogPage[T any] struct {
-	Data       []T     `json:"data"`
-	NextCursor *string `json:"next_cursor"`
-}
-
 // ListPlans returns every plan. placement is "standard" or "vpc"; empty uses
 // the backend default (standard). Prices differ by placement.
 func (c *Client) ListPlans(ctx context.Context, placement string) ([]Plan, error) {
@@ -91,7 +78,7 @@ func (c *Client) ListPlans(ctx context.Context, placement string) ([]Plan, error
 	if placement != "" {
 		path += "?placement=" + url.QueryEscape(placement)
 	}
-	plans, err := getCatalog[Plan](ctx, c, path)
+	plans, err := listAll[Plan](ctx, c, path)
 	if err != nil {
 		return nil, fmt.Errorf("listing plans: %w", err)
 	}
@@ -100,7 +87,7 @@ func (c *Client) ListPlans(ctx context.Context, placement string) ([]Plan, error
 
 // ListImages returns every image.
 func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
-	images, err := getCatalog[Image](ctx, c, "/images")
+	images, err := listAll[Image](ctx, c, "/images")
 	if err != nil {
 		return nil, fmt.Errorf("listing images: %w", err)
 	}
@@ -109,7 +96,7 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 
 // ListRegions returns every region with its placements.
 func (c *Client) ListRegions(ctx context.Context) ([]Region, error) {
-	regions, err := getCatalog[Region](ctx, c, "/regions")
+	regions, err := listAll[Region](ctx, c, "/regions")
 	if err != nil {
 		return nil, fmt.Errorf("listing regions: %w", err)
 	}
@@ -118,22 +105,9 @@ func (c *Client) ListRegions(ctx context.Context) ([]Region, error) {
 
 // ListDiskOfferings returns every disk offering.
 func (c *Client) ListDiskOfferings(ctx context.Context) ([]DiskOffering, error) {
-	offerings, err := getCatalog[DiskOffering](ctx, c, "/disk-offerings")
+	offerings, err := listAll[DiskOffering](ctx, c, "/disk-offerings")
 	if err != nil {
 		return nil, fmt.Errorf("listing disk offerings: %w", err)
 	}
 	return offerings, nil
-}
-
-// getCatalog fetches one unpaginated catalog list. The generic only removes the
-// envelope handling that all three lists share.
-func getCatalog[T any](ctx context.Context, c *Client, path string) ([]T, error) {
-	var page catalogPage[T]
-	if err := c.do(ctx, http.MethodGet, path, nil, &page); err != nil {
-		return nil, err
-	}
-	if page.NextCursor != nil && *page.NextCursor != "" {
-		return nil, errUnexpectedPagination
-	}
-	return page.Data, nil
 }

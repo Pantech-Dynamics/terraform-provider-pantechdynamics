@@ -19,6 +19,7 @@ func TestNewAPIError(t *testing.T) {
 		{"problem json", 404, notFoundBody, "RESOURCE_NOT_FOUND", "req_1", "request_id: req_1"},
 		{"not json", 502, "<html>bad gateway</html>", "", "", "Bad Gateway"},
 		{"empty body", 500, "", "", "", "Internal Server Error"},
+		{"wrong base url names the right prefix", 404, `{"status":404,"code":"GATEWAY_NO_ROUTE","request_id":"req_3"}`, "GATEWAY_NO_ROUTE", "req_3", "https://api.pantechdynamics.com/public/v1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

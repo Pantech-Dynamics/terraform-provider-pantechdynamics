@@ -38,12 +38,6 @@ type CreateSSHKeyRequest struct {
 	PublicKey string `json:"public_key,omitempty"`
 }
 
-// listSSHKeysResponse is one page of the key list.
-type listSSHKeysResponse struct {
-	Data       []SSHKey `json:"data"`
-	NextCursor *string  `json:"next_cursor"`
-}
-
 // CreateSSHKey registers a key. It is not retried on a 5xx or transport error:
 // the backend does not replay this endpoint on an Idempotency-Key, so a retry
 // after a lost response would return a 409 instead of the created key. Callers
@@ -69,26 +63,17 @@ func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 // them all in one page, but the cursor is followed anyway so a future page size
 // limit cannot silently truncate the result.
 func (c *Client) ListSSHKeys(ctx context.Context) ([]SSHKey, error) {
-	var keys []SSHKey
-	cursor := ""
-	for {
-		var page listSSHKeysResponse
-		if err := c.do(ctx, http.MethodGet, listPath("/ssh-keys", cursor), nil, &page); err != nil {
-			return nil, fmt.Errorf("listing ssh keys: %w", err)
-		}
-		keys = append(keys, page.Data...)
-
-		next := derefString(page.NextCursor)
-		if next == "" || next == cursor {
-			return keys, nil
-		}
-		cursor = next
+	keys, err := listAll[SSHKey](ctx, c, "/ssh-keys")
+	if err != nil {
+		return nil, fmt.Errorf("listing ssh keys: %w", err)
 	}
+	return keys, nil
 }
 
 // DeleteSSHKey removes a key. It returns ErrNotFound when the key is already
 // gone, which callers should treat as success because a repeated delete returns
-// 404, not 204.
+// 404, not 204. Like create, it is not retried on a 5xx or transport error,
+// because the spec says it does not replay on an Idempotency-Key yet.
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
 	if err := c.do(ctx, http.MethodDelete, sshKeyPath(id), nil, nil); err != nil {
 		return fmt.Errorf("deleting ssh key %s: %w", id, err)
@@ -99,19 +84,4 @@ func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
 // sshKeyPath escapes the id so a malformed value cannot alter the URL path.
 func sshKeyPath(id string) string {
 	return "/ssh-keys/" + url.PathEscape(id)
-}
-
-// listPath appends the cursor query parameter when there is one.
-func listPath(path, cursor string) string {
-	if cursor == "" {
-		return path
-	}
-	return path + "?cursor=" + url.QueryEscape(cursor)
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

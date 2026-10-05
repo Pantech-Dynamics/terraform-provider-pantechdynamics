@@ -19,6 +19,7 @@ type PortForwardingRule struct {
 	PublicPortEnd    int64      `json:"public_port_end"`
 	PrivatePortStart int64      `json:"private_port_start"`
 	PrivatePortEnd   int64      `json:"private_port_end"`
+	InstanceName     *string    `json:"instance_name"`
 	DesiredState     string     `json:"desired_state"`
 	ObservedState    string     `json:"observed_state"`
 	CreatedAt        *time.Time `json:"created_at"`
@@ -36,12 +37,6 @@ type CreatePortForwardingRuleRequest struct {
 	PrivatePortEnd   *int64 `json:"private_port_end,omitempty"`
 }
 
-// listPortForwardingRulesResponse accepts the spec's "rules" and the usual "data".
-type listPortForwardingRulesResponse struct {
-	Rules []PortForwardingRule `json:"rules"`
-	Data  []PortForwardingRule `json:"data"`
-}
-
 // CreatePortForwardingRule starts adding a rule to a public IP.
 func (c *Client) CreatePortForwardingRule(ctx context.Context, publicIPID string, req CreatePortForwardingRuleRequest) (*OperationReference, error) {
 	var ref OperationReference
@@ -51,29 +46,24 @@ func (c *Client) CreatePortForwardingRule(ctx context.Context, publicIPID string
 	return &ref, nil
 }
 
-// ListPortForwardingRules returns the rules of a public IP, or ErrNotFound when
-// the address is gone.
+// ListPortForwardingRules returns the rules of a public IP, following the
+// cursor, or ErrNotFound when the address is gone.
 func (c *Client) ListPortForwardingRules(ctx context.Context, publicIPID string) ([]PortForwardingRule, error) {
-	var page listPortForwardingRulesResponse
-	if err := c.do(ctx, http.MethodGet, publicIPPath(publicIPID)+"/port-forwarding-rules", nil, &page); err != nil {
+	rules, err := listAll[PortForwardingRule](ctx, c, publicIPPath(publicIPID)+"/port-forwarding-rules")
+	if err != nil {
 		return nil, fmt.Errorf("listing port forwarding rules of public ip %s: %w", publicIPID, err)
 	}
-	return append(page.Rules, page.Data...), nil
+	return rules, nil
 }
 
-// GetPortForwardingRule finds one rule by listing its address, because the spec
-// has no single-rule read. It returns ErrNotFound when the rule or address is gone.
+// GetPortForwardingRule returns one rule of a public IP. It returns ErrNotFound
+// when the rule or the address is gone.
 func (c *Client) GetPortForwardingRule(ctx context.Context, publicIPID, id string) (*PortForwardingRule, error) {
-	rules, err := c.ListPortForwardingRules(ctx, publicIPID)
-	if err != nil {
-		return nil, err
+	var rule PortForwardingRule
+	if err := c.do(ctx, http.MethodGet, publicIPPath(publicIPID)+"/port-forwarding-rules/"+url.PathEscape(id), nil, &rule); err != nil {
+		return nil, fmt.Errorf("getting port forwarding rule %s: %w", id, err)
 	}
-	for i := range rules {
-		if rules[i].ID == id {
-			return &rules[i], nil
-		}
-	}
-	return nil, fmt.Errorf("getting port forwarding rule %s: %w", id, ErrNotFound)
+	return &rule, nil
 }
 
 // DeletePortForwardingRule starts removing a rule.

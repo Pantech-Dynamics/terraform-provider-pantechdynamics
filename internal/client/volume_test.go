@@ -138,7 +138,7 @@ func TestVolumeActions(t *testing.T) {
 		path       string
 		bodyHas    string
 		wantKey    bool
-		retriedOn5 bool // verified replay, so a gateway error is retried
+		retriedOn5 bool // replays on the same key, so a gateway error is retried
 	}{
 		{"attach", func(c *Client) (*OperationReference, error) {
 			return c.AttachVolume(context.Background(), "vol_1", "vm_1")
@@ -148,10 +148,10 @@ func TestVolumeActions(t *testing.T) {
 		}, http.MethodPost, "/v1/volumes/vol_1/detach", "", true, true},
 		{"resize", func(c *Client) (*OperationReference, error) {
 			return c.ResizeVolume(context.Background(), "vol_1", "shared-10gb", 0)
-		}, http.MethodPost, "/v1/volumes/vol_1/resize", `"disk_offering_slug":"shared-10gb"`, true, false},
+		}, http.MethodPost, "/v1/volumes/vol_1/resize", `"disk_offering_slug":"shared-10gb"`, true, true},
 		{"delete", func(c *Client) (*OperationReference, error) {
 			return c.DeleteVolume(context.Background(), "vol_1")
-		}, http.MethodDelete, "/v1/volumes/vol_1", "", true, false},
+		}, http.MethodDelete, "/v1/volumes/vol_1", "", true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

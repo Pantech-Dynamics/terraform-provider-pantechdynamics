@@ -64,12 +64,6 @@ type attachVolumeRequest struct {
 	InstanceID string `json:"instance_id"`
 }
 
-// listVolumesResponse is one page of the volume list.
-type listVolumesResponse struct {
-	Data       []Volume `json:"data"`
-	NextCursor *string  `json:"next_cursor"`
-}
-
 // CreateVolume starts creating a volume. The returned operation's ResourceID is
 // the volume id. It is retried on gateway errors because the backend replays a
 // create on the same Idempotency-Key, verified on staging.
@@ -93,30 +87,20 @@ func (c *Client) GetVolume(ctx context.Context, id string) (*Volume, error) {
 
 // ListVolumes returns every live volume, following the cursor.
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
-	var volumes []Volume
-	cursor := ""
-	for {
-		var page listVolumesResponse
-		if err := c.do(ctx, http.MethodGet, listPath("/volumes", cursor), nil, &page); err != nil {
-			return nil, fmt.Errorf("listing volumes: %w", err)
-		}
-		volumes = append(volumes, page.Data...)
-
-		next := derefString(page.NextCursor)
-		if next == "" || next == cursor {
-			return volumes, nil
-		}
-		cursor = next
+	volumes, err := listAll[Volume](ctx, c, "/volumes")
+	if err != nil {
+		return nil, fmt.Errorf("listing volumes: %w", err)
 	}
+	return volumes, nil
 }
 
 // ResizeVolume grows a volume to another disk offering. A volume only grows: the
-// same or a smaller size is refused with 409 INVALID_RESOURCE_STATE. It is not
-// retried on gateway errors: replay of a resize is not verified.
+// same or a smaller size is refused with 409 INVALID_RESOURCE_STATE. It is
+// retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
 func (c *Client) ResizeVolume(ctx context.Context, id, diskOfferingSlug string, sizeGB int64) (*OperationReference, error) {
 	var ref OperationReference
 	req := resizeVolumeRequest{DiskOfferingSlug: diskOfferingSlug, SizeGB: sizeGB}
-	if err := c.do(ctx, http.MethodPost, volumePath(id)+"/resize", req, &ref); err != nil {
+	if err := c.do(ctx, http.MethodPost, volumePath(id)+"/resize", req, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("resizing volume %s: %w", id, err)
 	}
 	return &ref, nil
@@ -147,10 +131,10 @@ func (c *Client) DetachVolume(ctx context.Context, id string) (*OperationReferen
 
 // DeleteVolume starts deleting a volume. An attached volume is refused with 409.
 // A deleted volume stays readable as "deleted", and a repeated delete returns a
-// new operation. It is not retried on gateway errors: delete replay is unverified.
+// new operation. It is retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
 func (c *Client) DeleteVolume(ctx context.Context, id string) (*OperationReference, error) {
 	var ref OperationReference
-	if err := c.do(ctx, http.MethodDelete, volumePath(id), nil, &ref); err != nil {
+	if err := c.do(ctx, http.MethodDelete, volumePath(id), nil, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("deleting volume %s: %w", id, err)
 	}
 	return &ref, nil

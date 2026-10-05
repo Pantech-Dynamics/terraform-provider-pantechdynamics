@@ -426,6 +426,15 @@ func TestDelete(t *testing.T) {
 		}
 	})
 
+	t.Run("a group attached to a database explains what to do", func(t *testing.T) {
+		api := seeded(group("sg_1", "web", sshRule))
+		api.deleteErr = &client.APIError{Status: 409, Code: client.CodeSecurityGroupAttachedToDatabase, Detail: "attached to database db_1"}
+		text := errorText(del(api).Diagnostics)
+		if !strings.Contains(text, "attached to a database") || !strings.Contains(text, "security_group_ids") {
+			t.Fatalf("diags = %s", text)
+		}
+	})
+
 	t.Run("the default group cannot be deleted", func(t *testing.T) {
 		api := seeded(group("sg_1", "default", icmpRule))
 		api.deleteErr = &client.APIError{Status: 409, Code: client.CodeDefaultSecurityGroupUndeletable}

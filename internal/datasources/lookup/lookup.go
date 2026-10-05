@@ -13,6 +13,7 @@ import (
 func NotFound(kind, attr, value, scope string, available []string) string {
 	sorted := slices.Clone(available)
 	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
 	list := "none"
 	if len(sorted) > 0 {
 		list = strings.Join(sorted, ", ")

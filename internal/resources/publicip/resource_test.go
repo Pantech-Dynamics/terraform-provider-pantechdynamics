@@ -20,7 +20,7 @@ var nullStr = tftypes.NewValue(tftypes.String, nil)
 func planFor(s schema.Schema, purpose string, instance tftypes.Value) tfsdk.Plan {
 	return Plan(s, map[string]tftypes.Value{
 		"id": UnknownStr(), "network_id": Str("net_1"), "purpose": Str(purpose), "instance_id": instance,
-		"address": UnknownStr(), "region": UnknownStr(), "zone": UnknownStr(),
+		"network_name": UnknownStr(), "instance_name": UnknownStr(), "address": UnknownStr(), "region": UnknownStr(), "zone": UnknownStr(),
 		"observed_state": UnknownStr(), "created_at": UnknownStr(), "updated_at": UnknownStr(),
 	})
 }
@@ -28,7 +28,7 @@ func planFor(s schema.Schema, purpose string, instance tftypes.Value) tfsdk.Plan
 func stateFor(s schema.Schema) tfsdk.State {
 	return State(s, map[string]tftypes.Value{
 		"id": Str("pip_1"), "network_id": Str("net_1"), "purpose": Str("static_nat"), "instance_id": Str("vm_1"),
-		"address": Str("203.0.113.9"), "region": Str("af-abj"), "zone": Str("af-abj-2"), "observed_state": Str("active"),
+		"network_name": Str("main"), "instance_name": Str("web"), "address": Str("203.0.113.9"), "region": Str("af-abj"), "zone": Str("af-abj-2"), "observed_state": Str("active"),
 		"created_at": Str("2026-10-04T15:00:00Z"), "updated_at": Str("2026-10-04T15:00:00Z"),
 	})
 }
