@@ -54,7 +54,7 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 // Schema describes the attributes.
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.",
+		Description: "A private network (VPC). Subnets live inside it, and instances attach to a subnet. A network is billed monthly, and it takes one public address from the zone's pool, so creating one fails with IP_POOL_EXHAUSTED when the pool is empty. It has no in-place changes: changing any argument replaces it, which also requires its subnets, public IPs and instances to be removed first.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the network, starting with net_.",
