@@ -246,7 +246,7 @@ func TestCreate(t *testing.T) {
 		resp := create(api, map[string]tftypes.Value{"instance_id": str("vm_1")})
 
 		text := errorText(resp.Diagnostics)
-		if !strings.Contains(text, "CLOUDSTACK_JOB_FAILED") || !strings.Contains(text, `"shared"`) || !strings.Contains(text, "can still be deleted") {
+		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, `"shared"`) || !strings.Contains(text, "can still be deleted") {
 			t.Fatalf("diags = %s", text)
 		}
 		v := api.find("vol_1")
@@ -382,7 +382,7 @@ func TestCreateFromASnapshot(t *testing.T) {
 		api.restoreFails = true
 		resp := create(api, map[string]tftypes.Value{})
 
-		if !strings.Contains(errorText(resp.Diagnostics), "createVolume failed") {
+		if !strings.Contains(errorText(resp.Diagnostics), "PROVISIONING_RETRIES_EXHAUSTED") {
 			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
 		}
 		warned := false
@@ -555,7 +555,7 @@ func TestUpdate(t *testing.T) {
 		resp := update(api, nil, map[string]tftypes.Value{
 			"instance_id": str("vm_1"), "disk_offering_slug": str("shared-10gb"), "size_gb": unknownNum(),
 		})
-		if !strings.Contains(errorText(resp.Diagnostics), "CLOUDSTACK_JOB_FAILED") {
+		if !strings.Contains(errorText(resp.Diagnostics), "PROVISIONING_FAILED") {
 			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
 		}
 		m := getModel(t, resp.State)

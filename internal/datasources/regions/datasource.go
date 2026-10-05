@@ -66,10 +66,11 @@ func regionAttributes() map[string]schema.Attribute {
 			Description: "Where each kind of instance lands in this region. A kind the region does not offer is absent.",
 			NestedObject: schema.NestedAttributeObject{
 				Attributes: map[string]schema.Attribute{
-					"kind":               schema.StringAttribute{Computed: true, Description: "\"standard\" is a VPS with a public IP on the shared network. \"vpc\" is a VM in a customer VPC."},
-					"zone":               schema.StringAttribute{Computed: true, Description: "Zone where a new instance of this kind lands. Check an image's zones against it."},
-					"available":          schema.BoolAttribute{Computed: true, Description: "Whether your account can create an instance of this kind here now."},
-					"unavailable_reason": schema.StringAttribute{Computed: true, Description: "Why it is unavailable, or null when available."},
+					"kind":                 schema.StringAttribute{Computed: true, Description: "\"standard\" is a VPS with a public IP on the shared network. \"vpc\" is a VM in a customer VPC."},
+					"zone":                 schema.StringAttribute{Computed: true, Description: "Zone where a new instance of this kind lands. Check an image's zones against it."},
+					"available":            schema.BoolAttribute{Computed: true, Description: "Whether your account can create an instance of this kind here now."},
+					"unavailable_reason":   schema.StringAttribute{Computed: true, Description: "Why it is unavailable, or null when available."},
+					"private_network_cidr": schema.StringAttribute{Computed: true, Description: "Range of the zone's private database network, for example \"10.250.0.0/20\", when a standard instance there can add a private network interface (private_network on pantechdynamics_instance). Null otherwise, and always for \"vpc\". The security group of an instance with that interface must allow nothing from this range."},
 				},
 			},
 		},

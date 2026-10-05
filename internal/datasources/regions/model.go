@@ -19,10 +19,11 @@ type regionModel struct {
 }
 
 type placementModel struct {
-	Kind              types.String `tfsdk:"kind"`
-	Zone              types.String `tfsdk:"zone"`
-	Available         types.Bool   `tfsdk:"available"`
-	UnavailableReason types.String `tfsdk:"unavailable_reason"`
+	Kind               types.String `tfsdk:"kind"`
+	Zone               types.String `tfsdk:"zone"`
+	Available          types.Bool   `tfsdk:"available"`
+	UnavailableReason  types.String `tfsdk:"unavailable_reason"`
+	PrivateNetworkCIDR types.String `tfsdk:"private_network_cidr"`
 }
 
 // fromAPIResponse builds the state from the API's regions.
@@ -32,10 +33,11 @@ func fromAPIResponse(regions []client.Region) model {
 		placements := make([]placementModel, 0, len(r.Placements))
 		for _, p := range r.Placements {
 			placements = append(placements, placementModel{
-				Kind:              types.StringValue(p.Kind),
-				Zone:              types.StringValue(p.Zone),
-				Available:         types.BoolValue(p.Available),
-				UnavailableReason: types.StringPointerValue(p.UnavailableReason),
+				Kind:               types.StringValue(p.Kind),
+				Zone:               types.StringValue(p.Zone),
+				Available:          types.BoolValue(p.Available),
+				UnavailableReason:  types.StringPointerValue(p.UnavailableReason),
+				PrivateNetworkCIDR: types.StringPointerValue(p.PrivateNetworkCIDR),
 			})
 		}
 		m.Regions = append(m.Regions, regionModel{

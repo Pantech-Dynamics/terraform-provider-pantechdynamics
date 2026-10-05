@@ -38,8 +38,13 @@ func read(t *testing.T, api engineAPI) datasource.ReadResponse {
 
 func TestRead(t *testing.T) {
 	eol := "2030-11-14"
+	price, ngn := int64(14600), "NGN"
 	api := &fakeAPI{engines: []client.DatabaseEngine{
-		{Engine: "postgresql", DisplayName: "PostgreSQL", Port: 5432, Versions: []client.DatabaseEngineVersion{{Version: "18", EOLDate: &eol, Zones: []string{"af-abj-1", "af-abj-2"}}}},
+		{Engine: "postgresql", DisplayName: "PostgreSQL", Port: 5432, Versions: []client.DatabaseEngineVersion{{Version: "18", EOLDate: &eol, Zones: []string{"af-abj-1", "af-abj-2"}}},
+			Storage: []client.DatabaseStorageOption{
+				{ZoneID: "af-abj-1", MinIsPlanDisk: true, MaxGB: 2000, StepGB: 10, PricePerGBMonthMinor: &price, Currency: &ngn},
+				{ZoneID: "af-abj-2", MinGB: 50, MaxGB: 1000, StepGB: 20},
+			}},
 		{Engine: "mariadb", DisplayName: "MariaDB", Port: 3306},
 	}}
 	resp := read(t, api)
@@ -50,6 +55,17 @@ func TestRead(t *testing.T) {
 	resp.Diagnostics.Append(resp.State.Get(ctx, &m)...)
 	if len(m.Engines) != 2 || m.Engines[0].Port.ValueInt64() != 5432 || m.Engines[0].Versions[0].EOLDate.ValueString() != eol || len(m.Engines[0].Versions[0].Zones) != 2 {
 		t.Fatalf("model = %+v", m)
+	}
+	st := m.Engines[0].Storage
+	if len(st) != 2 || st[0].ZoneID.ValueString() != "af-abj-1" || !st[0].MinIsPlanDisk.ValueBool() || st[0].MaxGB.ValueInt64() != 2000 ||
+		st[0].StepGB.ValueInt64() != 10 || st[0].PricePerGBMonthMinor.ValueInt64() != price || st[0].Currency.ValueString() != ngn {
+		t.Fatalf("storage[0] = %+v", st)
+	}
+	if st[1].MinGB.ValueInt64() != 50 || st[1].MinIsPlanDisk.ValueBool() || !st[1].PricePerGBMonthMinor.IsNull() || !st[1].Currency.IsNull() {
+		t.Errorf("an unpriced zone must have null price and currency, got %+v", st[1])
+	}
+	if m.Engines[1].Storage == nil || len(m.Engines[1].Storage) != 0 {
+		t.Errorf("an engine with no storage must show an empty list, got %v", m.Engines[1].Storage)
 	}
 	if m.Engines[1].Versions == nil || len(m.Engines[1].Versions) != 0 {
 		t.Errorf("an engine with no versions must show an empty list, got %v", m.Engines[1].Versions)
