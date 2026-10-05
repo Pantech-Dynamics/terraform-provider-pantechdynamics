@@ -116,7 +116,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				},
 			},
 			"security_group_id": schema.StringAttribute{
-				Description:   "Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. Changing it updates the instance in place, but the platform only accepts the change on a stopped instance, so the instance is stopped, switched, and started again if it should be running.",
+				Description:   "Id of the security group to use, from pantechdynamics_security_group. Defaults to the account's default group, which every such instance shares. It is empty for an instance in a VPC subnet, which has no security group. Changing it updates the instance in place, but the platform only accepts the change on a stopped instance, so the instance is stopped, switched, and started again if it should be running.",
 				Optional:      true,
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
