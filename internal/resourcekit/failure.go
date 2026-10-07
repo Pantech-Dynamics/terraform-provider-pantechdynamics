@@ -2,13 +2,12 @@ package resourcekit
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 )
 
 // Provisioning failure codes a failed operation, instance or database carries
-// (cloud internal/provisioning/domain/failure_text.go). The backend's reason
+// from the backend. Its reason
 // already says what went wrong in plain words; the hints below only add what to
 // do about it in Terraform.
 const (
@@ -44,25 +43,9 @@ var failureHints = map[string]string{
 	FailureRetriesExhausted:    contactSupport,
 }
 
-// legacyFailureCodes maps the adapter codes that operations recorded before
-// 2026-10-05 may still carry to the code the same failure has now. Any other
-// CLOUDSTACK_ code reads as PROVISIONING_FAILED, as the backend reads it.
-var legacyFailureCodes = map[string]string{
-	"CLOUDSTACK_CAPACITY_ERROR":    FailureCapacityUnavailable,
-	"CLOUDSTACK_TIMEOUT":           FailureUnavailable,
-	"CLOUDSTACK_ACCOUNT_NOT_READY": FailureUnavailable,
-	"CLOUDSTACK_ACCOUNT_NOT_FOUND": FailureInternalError,
-	"CLOUDSTACK_ACCOUNT_RECREATED": FailureInternalError,
-}
-
 // FailureCodeHint returns the next step for a provisioning failure code, or ""
 // when the code is not one.
 func FailureCodeHint(code string) string {
-	if current, ok := legacyFailureCodes[code]; ok {
-		code = current
-	} else if strings.HasPrefix(code, "CLOUDSTACK_") {
-		code = FailureGeneric
-	}
 	return failureHints[code]
 }
 

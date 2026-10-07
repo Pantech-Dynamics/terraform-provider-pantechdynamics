@@ -26,7 +26,7 @@ func instanceIn(state string) client.Instance {
 // every case here also asserts that no redundant action was ever sent.
 func TestApplyPower(t *testing.T) {
 	failedInst := instanceIn(client.InstanceFailed)
-	failedInst.Failure = &client.InstanceFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "listAccounts failed"}
+	failedInst.Failure = &client.InstanceFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "the provider request failed"}
 
 	tests := []struct {
 		name        string
@@ -43,7 +43,7 @@ func TestApplyPower(t *testing.T) {
 		{"already running: nothing is sent", instanceIn("running"), "running", nil, 0, 0, "", "running"},
 		{"already stopped: nothing is sent", instanceIn("stopped"), "stopped", nil, 0, 0, "", "stopped"},
 		{"a failed instance is refused without sending anything", failedInst, "running", nil, 0, 0, "failed state", "failed"},
-		{"a failed instance is refused for a stop too", failedInst, "stopped", nil, 0, 0, "listAccounts failed", "failed"},
+		{"a failed instance is refused for a stop too", failedInst, "stopped", nil, 0, 0, "the provider request failed", "failed"},
 		{"stopping settles to stopped: a stop target needs no action", instanceIn("stopping"), "stopped", func(f *fakeAPI) { f.settleTo = "stopped" }, 0, 0, "", "stopped"},
 		{"stopping settles to stopped: a run target starts it", instanceIn("stopping"), "running", func(f *fakeAPI) { f.settleTo = "stopped" }, 0, 1, "", "running"},
 		{"provisioning settles to running: a run target needs no action", instanceIn("provisioning"), "running", func(f *fakeAPI) { f.settleTo = "running" }, 0, 0, "", "running"},
@@ -95,9 +95,9 @@ func TestApplyPowerLookupFailure(t *testing.T) {
 
 func TestFailedInstanceErrorQuotesTheReasonAndGivesAWayOut(t *testing.T) {
 	inst := instanceIn("failed")
-	inst.Failure = &client.InstanceFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "resolving account-scoped provider"}
+	inst.Failure = &client.InstanceFailure{Code: "PROVISIONING_RETRIES_EXHAUSTED", Reason: "the provider request failed"}
 	text := failedInstanceError(&inst).Error()
-	for _, want := range []string{"vm_1", "PROVISIONING_RETRIES_EXHAUSTED", "resolving account-scoped provider", "-replace"} {
+	for _, want := range []string{"vm_1", "PROVISIONING_RETRIES_EXHAUSTED", "the provider request failed", "-replace"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("error %q does not contain %q", text, want)
 		}

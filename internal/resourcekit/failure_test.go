@@ -21,9 +21,6 @@ func TestFailureCodeHint(t *testing.T) {
 		{FailureUnavailable, "in a few minutes"},
 		{FailureInternalError, "Contact support"},
 		{FailureGeneric, "quote the operation id"},
-		{"CLOUDSTACK_CAPACITY_ERROR", "plan_slug"},          // legacy, mapped
-		{"CLOUDSTACK_TIMEOUT", "in a few minutes"},          // legacy, mapped
-		{"CLOUDSTACK_JOB_FAILED", "quote the operation id"}, // legacy, any other
 	}
 	for _, tt := range tests {
 		if got := FailureCodeHint(tt.code); !strings.Contains(got, tt.want) {
