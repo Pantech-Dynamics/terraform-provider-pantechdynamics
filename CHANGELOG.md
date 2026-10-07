@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-10-07)
 
 FEATURES:
 
@@ -12,7 +12,7 @@ FEATURES:
 - `pantechdynamics_public_ip`: new read-only `network_name` and `instance_name`.
 - `pantechdynamics_database_engines`: new read-only `storage` on each engine, one entry per zone with `zone_id`, `min_gb`, `min_is_plan_disk`, `max_gb`, `step_gb`, `price_per_gb_month_minor` and `currency` (both null when unpriced): the limits and price for `storage_gb`.
 - `pantechdynamics_regions` and `pantechdynamics_region`: new read-only `private_network_cidr` on each placement, the zone's private database network range (null where there is none, and always for `vpc`).
-- A failed operation whose failure code is one of the `PROVISIONING_*` codes now adds what to do next (choose another plan or region, apply again later, delete unused resources, or contact support with the operation id). Legacy `PROVISIONING_*` codes on older operations get the hint of the code they map to.
+- A failed operation whose failure code is one of the `PROVISIONING_*` codes now adds what to do next (choose another plan or region, apply again later, delete unused resources, or contact support with the operation id).
 - Database and instance orders that failed with `payment_expired` (not paid within one hour) or, for a database, `organization_deleted` (cancelled because the organization was deleted; any payment returned to credit) say so in the error.
 
 BUG FIXES:
