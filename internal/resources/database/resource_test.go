@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -274,6 +275,10 @@ func TestUpdateSecurityGroups(t *testing.T) {
 	}
 }
 
+// errDatabaseNotFound is how the API answers a GET or DELETE of a deleted
+// database: its own code, not RESOURCE_NOT_FOUND.
+var errDatabaseNotFound = fmt.Errorf("getting database: %w", &client.APIError{Status: 404, Code: "DATABASE_NOT_FOUND", Detail: "No database with this id in your organization."})
+
 func TestRead(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -284,6 +289,7 @@ func TestRead(t *testing.T) {
 		{"running", seeded("running"), false, "running"},
 		{"stopped outside terraform", seeded("stopped"), false, "stopped"},
 		{"gone", &fakeAPI{}, true, ""},
+		{"gone, answered with DATABASE_NOT_FOUND", &fakeAPI{getErr: errDatabaseNotFound}, true, ""},
 		{"deleted but readable", seeded(client.DatabaseDeleted), true, ""},
 	}
 	for _, tt := range tests {
@@ -415,6 +421,7 @@ func TestDelete(t *testing.T) {
 	}{
 		{"waits until deleted", seeded("running")},
 		{"already gone", &fakeAPI{}},
+		{"already gone, answered with DATABASE_NOT_FOUND", &fakeAPI{deleteErr: errDatabaseNotFound}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

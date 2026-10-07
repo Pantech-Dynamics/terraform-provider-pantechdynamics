@@ -11,8 +11,10 @@ import (
 // Sentinel errors let callers branch with errors.Is, much like catching a
 // specific exception type in Java.
 var (
-	// ErrNotFound means the backend answered RESOURCE_NOT_FOUND. Read removes
-	// the resource from state on it, and Delete treats it as success.
+	// ErrNotFound means the backend answered RESOURCE_NOT_FOUND, or a
+	// resource-specific not-found code such as KUBERNETES_CLUSTER_NOT_FOUND.
+	// Read removes the resource from state on it, and Delete treats it as
+	// success.
 	ErrNotFound = errors.New("resource not found")
 
 	// ErrNoRoute means the gateway has no route for the request. That is a
@@ -30,6 +32,23 @@ const (
 	// snapshot schedule yet. It counts as "not found" like any missing resource.
 	codeSnapshotScheduleNotFound = "SNAPSHOT_SCHEDULE_NOT_FOUND"
 )
+
+// notFoundCodes are the 404 codes that mean the resource in the path does not
+// exist: RESOURCE_NOT_FOUND, and the resource-specific codes some endpoints
+// answer instead (every 404 *_NOT_FOUND code in the public contract). Field
+// codes such as PLAN_NOT_FOUND come inside a 422 VALIDATION_FAILED, never as
+// the top-level code, so they cannot match. NOT_FOUND ("not offered on this
+// platform") and GATEWAY_NO_ROUTE are left out on purpose: neither means the
+// object is gone.
+var notFoundCodes = map[string]bool{
+	codeResourceNotFound:          true,
+	codeSnapshotScheduleNotFound:  true,
+	CodeKubernetesClusterNotFound: true,
+	"DATABASE_NOT_FOUND":          true,
+	"DATABASE_SNAPSHOT_NOT_FOUND": true,
+	"DATABASE_ORDER_NOT_FOUND":    true,
+	"RECEIPT_NOT_FOUND":           true,
+}
 
 // FieldError is one entry of a 422 validation failure.
 type FieldError struct {
@@ -119,7 +138,10 @@ func validationDetail(fields []FieldError) string {
 func (e *APIError) Is(target error) bool {
 	switch target {
 	case ErrNotFound:
-		return e.Code == codeResourceNotFound || e.Code == codeSnapshotScheduleNotFound
+		// A deleted cluster answers KUBERNETES_CLUSTER_NOT_FOUND straight away,
+		// although its nodes are destroyed 12 hours later; that is gone. A
+		// deleted database answers DATABASE_NOT_FOUND.
+		return notFoundCodes[e.Code]
 	case ErrNoRoute:
 		return e.Code == codeGatewayNoRoute
 	default:

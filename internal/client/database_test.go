@@ -33,6 +33,11 @@ func TestGetDatabase(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 		}},
+		{"deleted database answers its own code", 404, `{"status":404,"code":"DATABASE_NOT_FOUND","detail":"No database with this id."}`, func(t *testing.T, _ *Database, err error) {
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v, want ErrNotFound so refresh drops it", err)
+			}
+		}},
 		{"unauthenticated", 401, `{"status":401,"code":"UNAUTHENTICATED"}`, func(t *testing.T, _ *Database, err error) {
 			if !HasCode(err, "UNAUTHENTICATED") {
 				t.Fatalf("err = %v", err)

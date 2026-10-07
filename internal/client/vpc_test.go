@@ -50,6 +50,18 @@ func TestVPCWritesUseTheRightRequest(t *testing.T) {
 			_, err := c.DeletePublicIP(context.Background(), "pip_1")
 			return err
 		}, http.MethodDelete, "/v1/public-ips/pip_1", ""},
+		{"reserve public ip without an instance", func(c *Client) error {
+			_, err := c.CreatePublicIP(context.Background(), CreatePublicIPRequest{NetworkID: "net_1", Purpose: PublicIPStaticNAT})
+			return err
+		}, http.MethodPost, "/v1/public-ips", `{"network_id":"net_1","purpose":"static_nat"}`},
+		{"attach public ip", func(c *Client) error {
+			_, err := c.AttachPublicIP(context.Background(), "pip_1", "vm_2")
+			return err
+		}, http.MethodPost, "/v1/public-ips/pip_1/attach", `{"instance_id":"vm_2"}`},
+		{"detach public ip", func(c *Client) error {
+			_, err := c.DetachPublicIP(context.Background(), "pip_1")
+			return err
+		}, http.MethodPost, "/v1/public-ips/pip_1/detach", ""},
 		{"create port forwarding rule", func(c *Client) error {
 			_, err := c.CreatePortForwardingRule(context.Background(), "pip_1", CreatePortForwardingRuleRequest{InstanceID: "vm_1", PublicPortStart: 2222})
 			return err
@@ -213,6 +225,44 @@ func TestPublicIPReadsZoneAndNames(t *testing.T) {
 	}
 	if derefString(ip.Zone) != "af-abj-2" || derefString(ip.NetworkName) != "main" || derefString(ip.InstanceName) != "web" {
 		t.Errorf("public ip = %+v", ip)
+	}
+}
+
+func TestPublicIPReadsADetachedAddress(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"pip_1","network_id":"net_1","purpose":"static_nat","instance_id":null,"instance_name":null,"address":"203.0.113.9","desired_state":"present","observed_state":"active","in_sync":false}`))
+	})
+	ip, err := c.GetPublicIP(context.Background(), "pip_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip.InstanceID != nil || ip.InSync {
+		t.Errorf("public ip = %+v, want no instance and in_sync false", ip)
+	}
+}
+
+func TestAttachWithNothingToChangeReturnsAnEmptyOperation(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"operation_id":"","resource_id":"pip_1","status":"succeeded"}`))
+	})
+	ref, err := c.AttachPublicIP(context.Background(), "pip_1", "vm_1")
+	if err != nil || ref.OperationID != "" || ref.ResourceID != "pip_1" {
+		t.Fatalf("ref = %+v, err %v", ref, err)
+	}
+}
+
+func TestAttachRefusalsKeepTheirCodes(t *testing.T) {
+	for _, code := range []string{CodePublicIPNotStaticNAT, CodeInstanceAlreadyHasPublicIP} {
+		t.Run(code, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"status":409,"code":"` + code + `"}`))
+			})
+			if _, err := c.AttachPublicIP(context.Background(), "pip_1", "vm_1"); !HasCode(err, code) {
+				t.Fatalf("err = %v", err)
+			}
+		})
 	}
 }
 

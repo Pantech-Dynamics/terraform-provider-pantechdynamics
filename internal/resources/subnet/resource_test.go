@@ -127,6 +127,7 @@ func TestDeleteIsIdempotentAndExplainsRefusals(t *testing.T) {
 	}{
 		{"already gone", client.ErrNotFound, ""},
 		{"still in use", &client.APIError{Status: 409, Code: client.CodeInvalidResourceState, Detail: "subnet has instances"}, "instances are still in it"},
+		{"clusters in it", &client.APIError{Status: 409, Code: client.CodeSubnetHasKubernetesClusters, Detail: "subnet has clusters"}, "Kubernetes clusters still run in this subnet"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

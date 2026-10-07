@@ -82,6 +82,13 @@ func TestAPIErrorIs(t *testing.T) {
 		{"gateway no route", &APIError{Status: 404, Code: "GATEWAY_NO_ROUTE"}, false, true},
 		{"bare 404 is neither", &APIError{Status: 404}, false, false},
 		{"missing snapshot schedule counts as not found", &APIError{Status: 404, Code: "SNAPSHOT_SCHEDULE_NOT_FOUND"}, true, false},
+		{"deleted kubernetes cluster", &APIError{Status: 404, Code: "KUBERNETES_CLUSTER_NOT_FOUND"}, true, false},
+		{"deleted database", &APIError{Status: 404, Code: "DATABASE_NOT_FOUND"}, true, false},
+		{"deleted database snapshot", &APIError{Status: 404, Code: "DATABASE_SNAPSHOT_NOT_FOUND"}, true, false},
+		{"unknown database order", &APIError{Status: 404, Code: "DATABASE_ORDER_NOT_FOUND"}, true, false},
+		{"unknown receipt", &APIError{Status: 404, Code: "RECEIPT_NOT_FOUND"}, true, false},
+		{"feature not offered is not a missing resource", &APIError{Status: 404, Code: "NOT_FOUND"}, false, false},
+		{"field code at top level is not matched", &APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []FieldError{{Field: "plan_slug", Code: "PLAN_NOT_FOUND"}}}, false, false},
 		{"unauthenticated", &APIError{Status: 401, Code: "UNAUTHENTICATED"}, false, false},
 	}
 	for _, tt := range tests {

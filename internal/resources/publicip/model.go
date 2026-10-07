@@ -20,13 +20,15 @@ type model struct {
 	Region        types.String   `tfsdk:"region"`
 	Zone          types.String   `tfsdk:"zone"`
 	ObservedState types.String   `tfsdk:"observed_state"`
+	InSync        types.Bool     `tfsdk:"in_sync"`
 	CreatedAt     types.String   `tfsdk:"created_at"`
 	UpdatedAt     types.String   `tfsdk:"updated_at"`
 	Timeouts      timeouts.Value `tfsdk:"timeouts"`
 }
 
-// toCreateRequest builds the create body. instance_id is sent only when set,
-// because port_forwarding addresses must not carry one.
+// toCreateRequest builds the create body. instance_id is sent only when set:
+// port_forwarding and load_balancer addresses must not carry one, and a
+// static_nat address without one is reserved unattached.
 func toCreateRequest(plan model) client.CreatePublicIPRequest {
 	return client.CreatePublicIPRequest{
 		NetworkID:  plan.NetworkID.ValueString(),
@@ -49,6 +51,7 @@ func fromAPIResponse(prev model, ip *client.PublicIP) model {
 		Region:        resourcekit.OptionalString(ip.Region),
 		Zone:          resourcekit.OptionalString(ip.Zone),
 		ObservedState: types.StringValue(ip.ObservedState),
+		InSync:        types.BoolValue(ip.InSync),
 		CreatedAt:     resourcekit.Timestamp(ip.CreatedAt),
 		UpdatedAt:     resourcekit.Timestamp(ip.UpdatedAt),
 		Timeouts:      prev.Timeouts,
@@ -69,6 +72,7 @@ func pendingModel(plan model, id string) model {
 		Region:        types.StringNull(),
 		Zone:          types.StringNull(),
 		ObservedState: types.StringNull(),
+		InSync:        types.BoolNull(),
 		CreatedAt:     types.StringNull(),
 		UpdatedAt:     types.StringNull(),
 		Timeouts:      plan.Timeouts,

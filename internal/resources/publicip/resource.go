@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
@@ -26,6 +27,11 @@ const (
 	// codeIPPoolExhausted is the operation failure when the region ran out of
 	// addresses between the availability check and the request.
 	codeIPPoolExhausted = "IP_POOL_EXHAUSTED"
+
+	// stateSyncing stands in for "active" while an attach or detach has not
+	// reached the address yet (in_sync false), or it does not point where it
+	// should yet, so the shared done check keeps waiting.
+	stateSyncing = "syncing"
 )
 
 // publicIPAPI is the part of the API client this resource needs. It is defined
@@ -34,8 +40,11 @@ type publicIPAPI interface {
 	CreatePublicIP(ctx context.Context, req client.CreatePublicIPRequest) (*client.OperationReference, error)
 	GetPublicIP(ctx context.Context, id string) (*client.PublicIP, error)
 	DeletePublicIP(ctx context.Context, id string) (*client.OperationReference, error)
+	AttachPublicIP(ctx context.Context, id, instanceID string) (*client.OperationReference, error)
+	DetachPublicIP(ctx context.Context, id string) (*client.OperationReference, error)
 	GetOperation(ctx context.Context, id string) (*client.Operation, error)
 	WaitForOperation(ctx context.Context, id string, done client.DoneCheck) error
+	WaitUntil(ctx context.Context, what string, done client.DoneCheck) error
 }
 
 var (
@@ -65,7 +74,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	resp.Schema = schema.Schema{
-		Description: "A public IPv4 address on a VPC network, billed monthly. A static_nat address maps every port to one instance. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. It cannot be changed in place, so changing any argument replaces it and the address changes.",
+		Description: "A public IPv4 address on a VPC network, billed monthly while it is held. A static_nat address maps every port to one instance; it can be reserved without one, and instance_id can be changed or removed in place, which attaches, moves or detaches the address without changing it. A detached address is still held and still billed, once. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. A load_balancer address carries pantechdynamics_load_balancer resources, one per public port. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. Changing network_id or purpose replaces it and the address changes. An organization can hold 20 public IPs of any purpose by default; past that a create is refused with PUBLIC_IP_LIMIT_EXCEEDED.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the public IP, starting with pip_.",
@@ -79,18 +88,21 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IDPrefix("network", "net_")},
 			},
 			"purpose": schema.StringAttribute{
-				Description:   "\"static_nat\" (the default) maps every port of the address to one instance and needs instance_id. \"port_forwarding\" carries port forwarding rules and takes no instance_id. Changing it replaces the address.",
+				Description:   "\"static_nat\" (the default) maps every port of the address to the instance in instance_id, or holds the address unattached when instance_id is omitted. \"port_forwarding\" carries port forwarding rules and takes no instance_id. \"load_balancer\" carries load balancers and takes no instance_id. Changing it replaces the address.",
 				Optional:      true,
 				Computed:      true,
 				Default:       stringdefault.StaticString(client.PublicIPStaticNAT),
 				PlanModifiers: replace,
-				Validators:    []validator.String{resourcekit.OneOf(client.PublicIPStaticNAT, client.PublicIPPortForwarding)},
+				Validators:    []validator.String{resourcekit.OneOf(client.PublicIPStaticNAT, client.PublicIPPortForwarding, client.PublicIPLoadBalancer)},
 			},
 			"instance_id": schema.StringAttribute{
-				Description:   "Id of the instance a static_nat address maps to. It must be in network_id. Not allowed for port_forwarding. Changing it replaces the address.",
-				Optional:      true,
-				PlanModifiers: replace,
-				Validators:    []validator.String{resourcekit.IDPrefix("instance", "vm_")},
+				Description: "Id of the instance a static_nat address maps to. It must be in network_id and must not already have a static_nat address of its own. Omit it to reserve the address unattached. Changing it moves the address to the new instance, and removing it detaches the address, both in place: the address and its id stay the same, and it stays billed while held. Not allowed for port_forwarding or load_balancer.",
+				Optional:    true,
+				Validators:  []validator.String{resourcekit.IDPrefix("instance", "vm_")},
+			},
+			"in_sync": schema.BoolAttribute{
+				Description: "False while an attach or detach has not reached the address yet. Terraform waits for it to be true after changing instance_id.",
+				Computed:    true,
 			},
 			"network_name": schema.StringAttribute{
 				Description:   "Name of the VPC network the address is for, as the platform reports it.",
@@ -98,7 +110,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: keep,
 			},
 			"instance_name": schema.StringAttribute{
-				Description: "Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding.",
+				Description: "Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding and load_balancer.",
 				Computed:    true,
 			},
 			"address": schema.StringAttribute{
@@ -129,7 +141,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Description: "When the address was last changed, in RFC 3339 UTC, to the second.",
 				Computed:    true,
 			},
-			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{Create: true, Delete: true}),
+			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{Create: true, Update: true, Delete: true}),
 		},
 	}
 }
@@ -146,13 +158,15 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 	if cfg.Purpose.IsNull() {
 		purpose = client.PublicIPStaticNAT // the schema default
 	}
+	// A static_nat address takes an instance_id or none: without one it is
+	// reserved, unattached.
 	switch {
-	case purpose == client.PublicIPStaticNAT && cfg.InstanceID.IsNull():
-		resp.Diagnostics.AddAttributeError(path.Root("instance_id"), "Missing instance_id",
-			"A static_nat public IP maps to one instance, so instance_id is required. For an address that carries port forwarding rules, set purpose = \"port_forwarding\".")
 	case purpose == client.PublicIPPortForwarding && !cfg.InstanceID.IsNull():
 		resp.Diagnostics.AddAttributeError(path.Root("instance_id"), "instance_id not allowed",
 			"A port_forwarding public IP names its instances in each pantechdynamics_port_forwarding_rule, so instance_id must be omitted.")
+	case purpose == client.PublicIPLoadBalancer && !cfg.InstanceID.IsNull():
+		resp.Diagnostics.AddAttributeError(path.Root("instance_id"), "instance_id not allowed",
+			"A load_balancer public IP names its instances in each pantechdynamics_load_balancer, so instance_id must be omitted.")
 	}
 }
 
@@ -185,7 +199,7 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 
 	ref, err := r.api.CreatePublicIP(ctx, toCreateRequest(plan))
 	if err != nil {
-		resourcekit.AddAPIError(&resp.Diagnostics, "Error creating public IP", err, attributeFor)
+		addCreateError(&resp.Diagnostics, err)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, pendingModel(plan, ref.ResourceID))...)
@@ -223,8 +237,10 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(state, ip))...)
 }
 
-// Update only runs when the timeouts block changed, because every other argument
-// replaces the address. It stores the new block and leaves the API alone.
+// Update attaches, moves or detaches a static_nat address when instance_id
+// changed; every other argument replaces the address. It waits for the
+// operation, then for the address to be in sync and point at the wanted
+// instance. A change of the timeouts block alone leaves the API untouched.
 func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -232,8 +248,97 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state.Timeouts = plan.Timeouts
-	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+	if plan.InstanceID.Equal(state.InstanceID) {
+		state.Timeouts = plan.Timeouts
+		resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+		return
+	}
+	ctx, cancel, ok := resourcekit.WithTimeout(ctx, plan.Timeouts.Update, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	defer cancel()
+
+	id := state.ID.ValueString()
+	want := plan.InstanceID.ValueString() // "" detaches
+	summary := "Error attaching public IP"
+	if want == "" {
+		summary = "Error detaching public IP"
+	}
+	ref, err := r.move(ctx, id, want)
+	if err != nil {
+		resourcekit.AddHintedAPIError(&resp.Diagnostics, summary, err, attributeFor, moveHints)
+		resp.Diagnostics.Append(resp.State.Set(ctx, state)...) // nothing changed
+		return
+	}
+	if err := r.waitSettled(ctx, ref.OperationID, id, want); err != nil {
+		resourcekit.AddWaitError(&resp.Diagnostics, summary, "public IP", id, err)
+		r.refreshOrKeep(ctx, state, id, &resp.State, &resp.Diagnostics)
+		return
+	}
+	ip, err := r.api.GetPublicIP(ctx, id)
+	if err != nil {
+		resourcekit.AddAPIError(&resp.Diagnostics, "Error reading public IP after the change", err, nil)
+		resp.Diagnostics.Append(resp.State.Set(ctx, state)...) // the next refresh catches up
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(plan, ip))...)
+}
+
+// move attaches the address to instanceID, or detaches it when instanceID is
+// empty.
+func (r *Resource) move(ctx context.Context, id, instanceID string) (*client.OperationReference, error) {
+	if instanceID == "" {
+		return r.api.DetachPublicIP(ctx, id)
+	}
+	return r.api.AttachPublicIP(ctx, id, instanceID)
+}
+
+// waitSettled follows an attach or detach: first its operation, when there is
+// one (an empty id means the backend had nothing to change), then the address
+// itself until it is in sync and points at want. The operation can report
+// success a moment before the address shows the change.
+func (r *Resource) waitSettled(ctx context.Context, opID, id, want string) error {
+	done := resourcekit.IsActive(r.settledStatus(id, want), r.api.GetOperation, "public IP", id, opID)
+	if opID != "" {
+		if err := r.api.WaitForOperation(ctx, opID, done); err != nil {
+			return err
+		}
+	}
+	return r.api.WaitUntil(ctx, "public IP "+id+" to be in sync", done)
+}
+
+// settledStatus reports "active" only once the address is active, in sync and
+// points at want ("" for detached), so the shared done check waits for all
+// three. A failed address is reported as failed.
+func (r *Resource) settledStatus(id, want string) resourcekit.StatusGetter {
+	return func(ctx context.Context) (resourcekit.Status, error) {
+		ip, err := r.api.GetPublicIP(ctx, id)
+		if err != nil {
+			return resourcekit.Status{}, err
+		}
+		st := resourcekit.Status{Observed: ip.ObservedState, Desired: ip.DesiredState}
+		got := ""
+		if ip.InstanceID != nil {
+			got = *ip.InstanceID
+		}
+		if st.Observed == resourcekit.StateActive && (!ip.InSync || got != want) {
+			st.Observed = stateSyncing
+		}
+		return st, nil
+	}
+}
+
+// refreshOrKeep stores what the platform reports after a failed change, or the
+// previous state when it cannot be read, so state never holds planned values
+// that were not applied.
+func (r *Resource) refreshOrKeep(ctx context.Context, prev model, id string, st *tfsdk.State, diags *diag.Diagnostics) {
+	ip, err := r.api.GetPublicIP(ctx, id)
+	if err != nil {
+		diags.Append(st.Set(ctx, prev)...)
+		return
+	}
+	diags.Append(st.Set(ctx, fromAPIResponse(prev, ip))...)
 }
 
 // Delete releases the address and waits until it is gone. An address that is
@@ -257,7 +362,8 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	}
 	if err != nil {
 		resourcekit.AddHintedError(&resp.Diagnostics, "Error deleting public IP", err, map[string]string{
-			client.CodeInvalidResourceState: "A public IP cannot be released while port forwarding rules still use it. Remove those rules first, then try again.",
+			client.CodeInvalidResourceState:     "A public IP cannot be released while port forwarding rules still use it. Remove those rules first, then try again.",
+			client.CodePublicIPHasLoadBalancers: "A public IP cannot be released while load balancers still use it. Delete those load balancers first, then try again.",
 		})
 		return
 	}
@@ -283,6 +389,30 @@ func (r *Resource) status(id string) resourcekit.StatusGetter {
 		}
 		return resourcekit.Status{Observed: ip.ObservedState, Desired: ip.DesiredState}, nil
 	}
+}
+
+// hintAlreadyHasPublicIP explains INSTANCE_ALREADY_HAS_PUBLIC_IP, on a create
+// and on an attach.
+const hintAlreadyHasPublicIP = "The instance already has a static_nat public IP of its own. Detach that address (remove instance_id from its pantechdynamics_public_ip) or release it, then run `terraform apply` again. To move an address between instances, change instance_id on the one address instead of creating a second."
+
+// createHints explain the create refusals a user can act on.
+var createHints = map[string]string{
+	client.CodePublicIPLimitExceeded:      "Your organization has reached its limit of public IPs of any purpose (20 by default). Release an address you no longer need, or contact support to raise the limit, then run `terraform apply` again. A detached static_nat address still counts until it is released.",
+	client.CodeStaticNATLimitExceeded:     "Your organization has reached its limit of static_nat public IPs. Release one you no longer need, use purpose = \"port_forwarding\" instead, or contact support to raise the limit.",
+	client.CodeInstanceAlreadyHasPublicIP: hintAlreadyHasPublicIP,
+}
+
+// moveHints explain the attach and detach refusals a user can act on.
+var moveHints = map[string]string{
+	client.CodeInstanceAlreadyHasPublicIP: hintAlreadyHasPublicIP,
+	client.CodePublicIPNotStaticNAT:       "Only a static_nat address can be attached or detached. A port_forwarding or load_balancer address names its instances in its rules or load balancers, so leave instance_id out.",
+	client.CodeInvalidResourceState:       "The public IP is busy with another change, for example still being created. Wait for it to finish, then run `terraform apply` again.",
+}
+
+// addCreateError reports a refused create: 422 field errors on their
+// attributes, and a hint for the limit refusals.
+func addCreateError(diags *diag.Diagnostics, err error) {
+	resourcekit.AddHintedAPIError(diags, "Error creating public IP", err, attributeFor, createHints)
 }
 
 // addCreateWaitError adds a hint when the region ran out of addresses.

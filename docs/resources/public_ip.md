@@ -3,19 +3,24 @@
 page_title: "pantechdynamics_public_ip Resource - pantechdynamics"
 subcategory: ""
 description: |-
-  A public IPv4 address on a VPC network, billed monthly. A static_nat address maps every port to one instance. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. It cannot be changed in place, so changing any argument replaces it and the address changes.
+  A public IPv4 address on a VPC network, billed monthly while it is held. A static_nat address maps every port to one instance; it can be reserved without one, and instance_id can be changed or removed in place, which attaches, moves or detaches the address without changing it. A detached address is still held and still billed, once. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. A load_balancer address carries pantechdynamics_load_balancer resources, one per public port. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. Changing network_id or purpose replaces it and the address changes. An organization can hold 20 public IPs of any purpose by default; past that a create is refused with PUBLIC_IP_LIMIT_EXCEEDED.
 ---
 
 # pantechdynamics_public_ip (Resource)
 
-A public IPv4 address on a VPC network, billed monthly. A static_nat address maps every port to one instance. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. It cannot be changed in place, so changing any argument replaces it and the address changes.
+A public IPv4 address on a VPC network, billed monthly while it is held. A static_nat address maps every port to one instance; it can be reserved without one, and instance_id can be changed or removed in place, which attaches, moves or detaches the address without changing it. A detached address is still held and still billed, once. A port_forwarding address carries pantechdynamics_port_forwarding_rule resources. A load_balancer address carries pantechdynamics_load_balancer resources, one per public port. The address opens nothing on its own: the subnet's firewall rules must allow the traffic. Changing network_id or purpose replaces it and the address changes. An organization can hold 20 public IPs of any purpose by default; past that a create is refused with PUBLIC_IP_LIMIT_EXCEEDED.
 
 ## Example Usage
 
 ```terraform
 # A public address that maps every port to one instance (static NAT), billed
-# monthly. It opens nothing on its own: the subnet's firewall rules must allow
-# the traffic too.
+# monthly while you hold it. It opens nothing on its own: the subnet's firewall
+# rules must allow the traffic too.
+#
+# instance_id changes in place: point it at another instance to move the same
+# address there (for example to a replacement server), or remove it to detach
+# the address and keep it. A detached address is still yours and still billed,
+# once, until it is attached again or destroyed.
 resource "pantechdynamics_public_ip" "web" {
   network_id  = pantechdynamics_network.main.id
   instance_id = pantechdynamics_instance.web.id
@@ -25,10 +30,23 @@ output "web_address" {
   value = pantechdynamics_public_ip.web.address
 }
 
+# A static NAT address reserved without an instance, to attach later by
+# setting instance_id.
+resource "pantechdynamics_public_ip" "spare" {
+  network_id = pantechdynamics_network.main.id
+}
+
 # An address that carries port forwarding rules instead takes no instance.
 resource "pantechdynamics_public_ip" "gateway" {
   network_id = pantechdynamics_network.main.id
   purpose    = "port_forwarding"
+}
+
+# An address that carries load balancers (pantechdynamics_load_balancer), one per
+# public port, also takes no instance.
+resource "pantechdynamics_public_ip" "lb" {
+  network_id = pantechdynamics_network.main.id
+  purpose    = "load_balancer"
 }
 ```
 
@@ -41,8 +59,8 @@ resource "pantechdynamics_public_ip" "gateway" {
 
 ### Optional
 
-- `instance_id` (String) Id of the instance a static_nat address maps to. It must be in network_id. Not allowed for port_forwarding. Changing it replaces the address.
-- `purpose` (String) "static_nat" (the default) maps every port of the address to one instance and needs instance_id. "port_forwarding" carries port forwarding rules and takes no instance_id. Changing it replaces the address.
+- `instance_id` (String) Id of the instance a static_nat address maps to. It must be in network_id and must not already have a static_nat address of its own. Omit it to reserve the address unattached. Changing it moves the address to the new instance, and removing it detaches the address, both in place: the address and its id stay the same, and it stays billed while held. Not allowed for port_forwarding or load_balancer.
+- `purpose` (String) "static_nat" (the default) maps every port of the address to the instance in instance_id, or holds the address unattached when instance_id is omitted. "port_forwarding" carries port forwarding rules and takes no instance_id. "load_balancer" carries load balancers and takes no instance_id. Changing it replaces the address.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
@@ -50,7 +68,8 @@ resource "pantechdynamics_public_ip" "gateway" {
 - `address` (String) The public IPv4 address.
 - `created_at` (String) When the address was allocated, in RFC 3339 UTC, to the second.
 - `id` (String) Identifier of the public IP, starting with pip_.
-- `instance_name` (String) Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding.
+- `in_sync` (Boolean) False while an attach or detach has not reached the address yet. Terraform waits for it to be true after changing instance_id.
+- `instance_name` (String) Name of the instance a static_nat address maps to, as the platform reports it. Null for port_forwarding and load_balancer.
 - `network_name` (String) Name of the VPC network the address is for, as the platform reports it.
 - `observed_state` (String) State of the address as the platform sees it, for example "active".
 - `region` (String) Region the address lives in.
@@ -64,6 +83,7 @@ Optional:
 
 - `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 - `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
+- `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 
 ## Import
 

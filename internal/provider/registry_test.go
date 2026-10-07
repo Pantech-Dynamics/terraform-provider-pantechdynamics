@@ -72,7 +72,7 @@ func TestRegisteredSchemasAreValid(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"resource pantechdynamics_database", "resource pantechdynamics_database_snapshot", "data pantechdynamics_database_engines", "data pantechdynamics_security_group", "data pantechdynamics_ssh_key", "data pantechdynamics_instance", "data pantechdynamics_network"} {
+	for _, want := range []string{"resource pantechdynamics_database", "resource pantechdynamics_database_snapshot", "data pantechdynamics_database_engines", "data pantechdynamics_security_group", "data pantechdynamics_ssh_key", "data pantechdynamics_instance", "data pantechdynamics_network", "resource pantechdynamics_load_balancer", "data pantechdynamics_load_balancer", "resource pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_versions"} {
 		if !seen[want] {
 			t.Errorf("%s is not registered", want)
 		}

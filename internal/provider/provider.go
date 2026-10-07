@@ -11,6 +11,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/databaseengines"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/kubernetesversions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/lookups"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
@@ -18,6 +19,8 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetescluster"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/loadbalancer"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/network"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/portforward"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/publicip"
@@ -184,6 +187,8 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		databasesnapshot.New,
 		firewallrule.New,
 		instance.New,
+		kubernetescluster.New,
+		loadbalancer.New,
 		network.New,
 		portforward.New,
 		publicip.New,
@@ -203,7 +208,10 @@ func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() dataso
 		diskofferings.New,
 		images.New,
 		images.NewSingle,
+		kubernetesversions.New,
 		lookups.NewInstance,
+		lookups.NewKubernetesCluster,
+		lookups.NewLoadBalancer,
 		lookups.NewNetwork,
 		lookups.NewSecurityGroup,
 		lookups.NewSSHKey,

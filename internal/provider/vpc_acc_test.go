@@ -123,6 +123,14 @@ resource "pantechdynamics_public_ip" "test" {
 }
 `
 
+// staticNATDetached is staticNAT with instance_id removed: the address is
+// detached in place and kept.
+const staticNATDetached = `
+resource "pantechdynamics_public_ip" "test" {
+  network_id = pantechdynamics_network.test.id
+}
+`
+
 const portForward = `
 resource "pantechdynamics_public_ip" "fwd" {
   network_id = pantechdynamics_network.test.id
@@ -153,6 +161,17 @@ func (s *seenIDs) capture(addrs ...string) resource.TestCheckFunc {
 			if !slices.Contains(s.byKind[a], rs.Primary.ID) {
 				s.byKind[a] = append(s.byKind[a], rs.Primary.ID)
 			}
+		}
+		return nil
+	}
+}
+
+// onlyOneID fails if the address at addr ever had more than one id, which
+// would mean a change replaced it instead of applying in place.
+func (s *seenIDs) onlyOneID(addr string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		if n := len(s.byKind[addr]); n != 1 {
+			return fmt.Errorf("%s had %d ids %v, want 1: it was replaced", addr, n, s.byKind[addr])
 		}
 		return nil
 	}
@@ -248,6 +267,26 @@ resource "pantechdynamics_instance" "bad" {
 			{ResourceName: "pantechdynamics_network.test", ImportState: true, ImportStateVerify: true, ImportStateVerifyIgnore: []string{"timeouts"}},
 			{ResourceName: "pantechdynamics_subnet.test", ImportState: true, ImportStateVerify: true, ImportStateVerifyIgnore: []string{"timeouts"}},
 			{ResourceName: "pantechdynamics_public_ip.test", ImportState: true, ImportStateVerify: true, ImportStateVerifyIgnore: []string{"timeouts"}},
+			{
+				// No extra spend: detach the same address in place, keeping it.
+				Config: base + staticNATDetached,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("pantechdynamics_public_ip.test", "instance_id"),
+					resource.TestCheckResourceAttr("pantechdynamics_public_ip.test", "in_sync", "true"),
+					seen.capture("pantechdynamics_public_ip.test"),
+					seen.onlyOneID("pantechdynamics_public_ip.test"),
+				),
+			},
+			{
+				// And attach it again, still the same address.
+				Config: base + staticNAT,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrPair("pantechdynamics_public_ip.test", "instance_id", "pantechdynamics_instance.test", "id"),
+					resource.TestCheckResourceAttr("pantechdynamics_public_ip.test", "in_sync", "true"),
+					seen.capture("pantechdynamics_public_ip.test"),
+					seen.onlyOneID("pantechdynamics_public_ip.test"),
+				),
+			},
 			{
 				ResourceName:            "pantechdynamics_firewall_rule.ssh",
 				ImportState:             true,

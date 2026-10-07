@@ -442,7 +442,16 @@ func TestDelete(t *testing.T) {
 		api := seeded(running("vm_1", "web"))
 		api.deleteErr = &client.APIError{Status: 409, Code: client.CodeInstanceHasPublicIP}
 		text := errorText(del(api).Diagnostics)
-		if !strings.Contains(text, "public IP") || !strings.Contains(text, "Release") {
+		if !strings.Contains(text, "public IP") || !strings.Contains(text, "Detach") || !strings.Contains(text, "release it") {
+			t.Fatalf("diags = %s", text)
+		}
+	})
+
+	t.Run("a load balancer blocks the delete with guidance", func(t *testing.T) {
+		api := seeded(running("vm_1", "web"))
+		api.deleteErr = &client.APIError{Status: 409, Code: client.CodeInstanceBehindLoadBalancer}
+		text := errorText(del(api).Diagnostics)
+		if !strings.Contains(text, "load balancer") || !strings.Contains(text, "instance_ids") {
 			t.Fatalf("diags = %s", text)
 		}
 	})

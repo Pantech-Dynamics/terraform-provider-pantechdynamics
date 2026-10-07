@@ -19,6 +19,10 @@ const (
 	CodeInstanceHasPublicIP     = "INSTANCE_HAS_PUBLIC_IP"
 	CodeInstanceHasPortForwards = "INSTANCE_HAS_PORT_FORWARDS"
 
+	// CodeInstanceBehindLoadBalancer refuses a delete while the instance is a
+	// target of a load balancer.
+	CodeInstanceBehindLoadBalancer = "INSTANCE_BEHIND_LOAD_BALANCER"
+
 	// CodeInstanceMustBeStopped refuses a security group change on a running instance.
 	CodeInstanceMustBeStopped = "INSTANCE_MUST_BE_STOPPED"
 

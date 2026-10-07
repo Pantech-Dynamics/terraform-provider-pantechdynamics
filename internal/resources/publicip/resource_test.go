@@ -21,16 +21,45 @@ func planFor(s schema.Schema, purpose string, instance tftypes.Value) tfsdk.Plan
 	return Plan(s, map[string]tftypes.Value{
 		"id": UnknownStr(), "network_id": Str("net_1"), "purpose": Str(purpose), "instance_id": instance,
 		"network_name": UnknownStr(), "instance_name": UnknownStr(), "address": UnknownStr(), "region": UnknownStr(), "zone": UnknownStr(),
-		"observed_state": UnknownStr(), "created_at": UnknownStr(), "updated_at": UnknownStr(),
+		"observed_state": UnknownStr(), "in_sync": Unknown(tftypes.Bool), "created_at": UnknownStr(), "updated_at": UnknownStr(),
 	})
 }
 
-func stateFor(s schema.Schema) tfsdk.State {
+func stateFor(s schema.Schema) tfsdk.State { return stateWith(s, Str("vm_1")) }
+
+// stateWith is an active static_nat address pointing at instance (null for
+// detached).
+func stateWith(s schema.Schema, instance tftypes.Value) tfsdk.State {
 	return State(s, map[string]tftypes.Value{
-		"id": Str("pip_1"), "network_id": Str("net_1"), "purpose": Str("static_nat"), "instance_id": Str("vm_1"),
+		"id": Str("pip_1"), "network_id": Str("net_1"), "purpose": Str("static_nat"), "instance_id": instance,
 		"network_name": Str("main"), "instance_name": Str("web"), "address": Str("203.0.113.9"), "region": Str("af-abj"), "zone": Str("af-abj-2"), "observed_state": Str("active"),
-		"created_at": Str("2026-10-04T15:00:00Z"), "updated_at": Str("2026-10-04T15:00:00Z"),
+		"in_sync": tftypes.NewValue(tftypes.Bool, true), "created_at": Str("2026-10-04T15:00:00Z"), "updated_at": Str("2026-10-04T15:00:00Z"),
 	})
+}
+
+// updatePlan plans the address of stateWith with instance_id set to instance.
+func updatePlan(s schema.Schema, instance tftypes.Value) tfsdk.Plan {
+	return Plan(s, map[string]tftypes.Value{
+		"id": Str("pip_1"), "network_id": Str("net_1"), "purpose": Str("static_nat"), "instance_id": instance,
+		"network_name": Str("main"), "instance_name": UnknownStr(), "address": Str("203.0.113.9"), "region": Str("af-abj"), "zone": Str("af-abj-2"),
+		"observed_state": UnknownStr(), "in_sync": Unknown(tftypes.Bool), "created_at": Str("2026-10-04T15:00:00Z"), "updated_at": UnknownStr(),
+	})
+}
+
+// seededIP is the API's view of the address in stateWith.
+func seededIP(instance *string) client.PublicIP {
+	return client.PublicIP{
+		ID: "pip_1", NetworkID: "net_1", Purpose: "static_nat", InstanceID: instance, Address: ptr("203.0.113.9"),
+		DesiredState: "present", ObservedState: "active", InSync: true, CreatedAt: now(), UpdatedAt: now(),
+	}
+}
+
+func update(t *testing.T, api *fakeAPI, from, to tftypes.Value) *resource.UpdateResponse {
+	t.Helper()
+	s := testSchema(t)
+	resp := &resource.UpdateResponse{State: stateWith(s, from)}
+	(&Resource{api: api}).Update(Ctx, resource.UpdateRequest{Plan: updatePlan(s, to), State: stateWith(s, from)}, resp)
+	return resp
 }
 
 func getModel(t *testing.T, st tfsdk.State) model {
@@ -99,6 +128,21 @@ func TestCreateRefusedByTheAPIPointsAtTheAttribute(t *testing.T) {
 	resp := create(t, api, "static_nat", Str("vm_1"))
 	if !strings.Contains(ErrorText(resp.Diagnostics), "INSTANCE_NOT_IN_NETWORK") || !IsRemoved(resp.State) {
 		t.Fatalf("diagnostics = %v", resp.Diagnostics)
+	}
+}
+
+func TestCreateLimitRefusalsCarryHints(t *testing.T) {
+	for code, want := range map[string]string{
+		client.CodePublicIPLimitExceeded:  "20 by default",
+		client.CodeStaticNATLimitExceeded: "port_forwarding",
+	} {
+		t.Run(code, func(t *testing.T) {
+			api := &fakeAPI{createErr: &client.APIError{Status: 403, Code: code, Detail: "limit reached"}}
+			resp := create(t, api, "static_nat", Str("vm_1"))
+			if text := ErrorText(resp.Diagnostics); !strings.Contains(text, code) || !strings.Contains(text, want) || !IsRemoved(resp.State) {
+				t.Fatalf("diagnostics = %q", text)
+			}
+		})
 	}
 }
 
@@ -173,10 +217,12 @@ func TestValidateConfigTiesInstanceIDToPurpose(t *testing.T) {
 	}{
 		{"static nat with an instance", Str("static_nat"), Str("vm_1"), ""},
 		{"default purpose with an instance", nullStr, Str("vm_1"), ""},
-		{"default purpose without an instance", nullStr, nullStr, "Missing instance_id"},
-		{"static nat without an instance", Str("static_nat"), nullStr, "Missing instance_id"},
+		{"default purpose without an instance is a reservation", nullStr, nullStr, ""},
+		{"static nat without an instance is a reservation", Str("static_nat"), nullStr, ""},
 		{"port forwarding without an instance", Str("port_forwarding"), nullStr, ""},
 		{"port forwarding with an instance", Str("port_forwarding"), Str("vm_1"), "instance_id not allowed"},
+		{"load balancer without an instance", Str("load_balancer"), nullStr, ""},
+		{"load balancer with an instance", Str("load_balancer"), Str("vm_1"), "instance_id not allowed"},
 		{"unknown instance is skipped", Str("static_nat"), UnknownStr(), ""},
 		{"unknown purpose is skipped", UnknownStr(), nullStr, ""},
 	}
@@ -193,5 +239,178 @@ func TestValidateConfigTiesInstanceIDToPurpose(t *testing.T) {
 				t.Errorf("diagnostics = %q, want %q", text, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestCreateStaticNATWithoutAnInstanceReserves(t *testing.T) {
+	api := &fakeAPI{}
+	resp := create(t, api, "static_nat", nullStr)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	m := getModel(t, resp.State)
+	if !m.InstanceID.IsNull() || m.Address.ValueString() != "203.0.113.9" || !m.InSync.ValueBool() {
+		t.Errorf("model = %+v", m)
+	}
+	if api.lastCreate.InstanceID != "" || api.lastCreate.Purpose != "static_nat" {
+		t.Errorf("request = %+v, want static_nat with no instance", api.lastCreate)
+	}
+}
+
+func TestInstanceIDChangesInPlace(t *testing.T) {
+	s := testSchema(t)
+	modifiers := func(name string) int {
+		attr, ok := s.Attributes[name].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s is not a string attribute", name)
+		}
+		return len(attr.PlanModifiers)
+	}
+	if n := modifiers("instance_id"); n != 0 {
+		t.Fatalf("instance_id has %d plan modifiers; a change must attach or detach, not replace", n)
+	}
+	for _, name := range []string{"network_id", "purpose"} {
+		if modifiers(name) == 0 {
+			t.Errorf("%s must still replace the address", name)
+		}
+	}
+}
+
+func TestUpdateAttachesAReservedAddressAndWaitsForSync(t *testing.T) {
+	api := &fakeAPI{ips: []client.PublicIP{seededIP(nil)}, syncAfter: 3}
+	resp := update(t, api, nullStr, Str("vm_2"))
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if len(api.attaches) != 1 || api.attaches[0] != "vm_2" || api.detaches != 0 || api.creates != 0 || api.deletes != 0 {
+		t.Fatalf("attaches %v, detaches %d, creates %d, deletes %d", api.attaches, api.detaches, api.creates, api.deletes)
+	}
+	if len(api.waitedOps) != 1 || api.waitedOps[0] != "op_move" {
+		t.Errorf("waited on %v, want op_move", api.waitedOps)
+	}
+	m := getModel(t, resp.State)
+	if m.InstanceID.ValueString() != "vm_2" || !m.InSync.ValueBool() || m.ID.ValueString() != "pip_1" || m.Address.ValueString() != "203.0.113.9" {
+		t.Errorf("model = %+v, want the same address on vm_2, in sync", m)
+	}
+}
+
+func TestUpdateMovesTheAddressToAnotherInstance(t *testing.T) {
+	api := &fakeAPI{ips: []client.PublicIP{seededIP(ptr("vm_1"))}, syncAfter: 1}
+	resp := update(t, api, Str("vm_1"), Str("vm_2"))
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if len(api.attaches) != 1 || api.attaches[0] != "vm_2" || api.detaches != 0 {
+		t.Fatalf("attaches %v, detaches %d: a move is one attach", api.attaches, api.detaches)
+	}
+	if m := getModel(t, resp.State); m.InstanceID.ValueString() != "vm_2" {
+		t.Errorf("instance_id = %v", m.InstanceID)
+	}
+}
+
+func TestUpdateRemovingInstanceIDDetaches(t *testing.T) {
+	api := &fakeAPI{ips: []client.PublicIP{seededIP(ptr("vm_1"))}, syncAfter: 2}
+	resp := update(t, api, Str("vm_1"), nullStr)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if api.detaches != 1 || len(api.attaches) != 0 || api.deletes != 0 {
+		t.Fatalf("detaches %d, attaches %v, deletes %d", api.detaches, api.attaches, api.deletes)
+	}
+	m := getModel(t, resp.State)
+	if !m.InstanceID.IsNull() || !m.InSync.ValueBool() || m.Address.ValueString() != "203.0.113.9" {
+		t.Errorf("model = %+v, want the address kept, detached, in sync", m)
+	}
+}
+
+func TestUpdateWithNothingToChangeSkipsTheOperation(t *testing.T) {
+	api := &fakeAPI{ips: []client.PublicIP{seededIP(ptr("vm_1"))}, noOp: true}
+	resp := update(t, api, nullStr, Str("vm_1")) // state lagged; the API already points there
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if len(api.waitedOps) != 0 {
+		t.Errorf("waited on %v; an empty operation_id has nothing to follow", api.waitedOps)
+	}
+	if m := getModel(t, resp.State); m.InstanceID.ValueString() != "vm_1" {
+		t.Errorf("instance_id = %v", m.InstanceID)
+	}
+}
+
+func TestUpdateOnlyTimeoutsCallsNothing(t *testing.T) {
+	api := &fakeAPI{ips: []client.PublicIP{seededIP(ptr("vm_1"))}}
+	resp := update(t, api, Str("vm_1"), Str("vm_1"))
+	if resp.Diagnostics.HasError() || len(api.attaches) != 0 || api.detaches != 0 {
+		t.Fatalf("diags %v, attaches %v, detaches %d", resp.Diagnostics, api.attaches, api.detaches)
+	}
+}
+
+func TestUpdateRefusalsCarryHintsAndKeepState(t *testing.T) {
+	tests := []struct {
+		name     string
+		api      *fakeAPI
+		from, to tftypes.Value
+		want     []string
+	}{
+		{"instance already has an address", &fakeAPI{attachErr: &client.APIError{Status: 409, Code: client.CodeInstanceAlreadyHasPublicIP}}, Str("vm_1"), Str("vm_2"),
+			[]string{"Error attaching public IP", client.CodeInstanceAlreadyHasPublicIP, "Detach that address"}},
+		{"not a static nat address", &fakeAPI{detachErr: &client.APIError{Status: 409, Code: client.CodePublicIPNotStaticNAT}}, Str("vm_1"), nullStr,
+			[]string{"Error detaching public IP", client.CodePublicIPNotStaticNAT, "Only a static_nat address"}},
+		{"instance in another network", &fakeAPI{attachErr: &client.APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []client.FieldError{{Field: "instance_id", Code: client.FieldCodeInstanceNotInNetwork, Message: "is not in the address's network"}}}}, nullStr, Str("vm_9"),
+			[]string{"Error attaching public IP", client.FieldCodeInstanceNotInNetwork}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := update(t, tt.api, tt.from, tt.to)
+			text := ErrorText(resp.Diagnostics)
+			for _, w := range tt.want {
+				if !strings.Contains(text, w) {
+					t.Errorf("diagnostics = %q, want %q", text, w)
+				}
+			}
+			if m := getModel(t, resp.State); !m.InstanceID.Equal(getModel(t, stateWith(testSchema(t), tt.from)).InstanceID) {
+				t.Errorf("instance_id = %v, want the old value kept", m.InstanceID)
+			}
+		})
+	}
+}
+
+func TestUpdateFailedOperationStoresWhatThePlatformReports(t *testing.T) {
+	api := &fakeAPI{
+		ips:     []client.PublicIP{seededIP(ptr("vm_1"))},
+		waitErr: &client.OperationError{Operation: client.Operation{ID: "op_move", Status: client.OperationFailed, Failure: &client.OperationFailure{Code: "PROVISIONING_FAILED", Reason: "refused"}}},
+	}
+	resp := update(t, api, Str("vm_1"), nullStr)
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("want an error")
+	}
+	// The fake applied the detach before the operation failed, so state follows
+	// the platform rather than the plan or the old state.
+	if m := getModel(t, resp.State); !m.InstanceID.IsNull() {
+		t.Errorf("instance_id = %v, want what the API reports", m.InstanceID)
+	}
+}
+
+func TestReadReportsInSyncAndADetachedAddress(t *testing.T) {
+	s := testSchema(t)
+	ip := seededIP(nil)
+	ip.InSync = false
+	api := &fakeAPI{ips: []client.PublicIP{ip}, unsynced: 5}
+	resp := &resource.ReadResponse{State: stateFor(s)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	m := getModel(t, resp.State)
+	if !m.InstanceID.IsNull() || m.InSync.ValueBool() || IsRemoved(resp.State) {
+		t.Errorf("model = %+v, want kept, detached, in_sync false", m)
+	}
+}
+
+func TestCreateRefusedForAnInstanceThatHasAnAddress(t *testing.T) {
+	api := &fakeAPI{createErr: &client.APIError{Status: 409, Code: client.CodeInstanceAlreadyHasPublicIP}}
+	resp := create(t, api, "static_nat", Str("vm_1"))
+	if text := ErrorText(resp.Diagnostics); !strings.Contains(text, "Detach that address") {
+		t.Fatalf("diagnostics = %q", text)
 	}
 }

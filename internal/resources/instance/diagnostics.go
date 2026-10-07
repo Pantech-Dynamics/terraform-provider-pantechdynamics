@@ -57,7 +57,12 @@ func addCreateError(diags *diag.Diagnostics, err error) {
 func addDeleteError(diags *diag.Diagnostics, err error) {
 	if client.HasCode(err, client.CodeInstanceHasPublicIP) || client.HasCode(err, client.CodeInstanceHasPortForwards) {
 		diags.AddError("Instance still has a public IP or port forwards",
-			err.Error()+"\n\nRelease the public IP or delete the port forwarding rules that point at this instance first, then try again.")
+			err.Error()+"\n\nDetach the static_nat public IP (remove instance_id from its pantechdynamics_public_ip, which keeps the address) or release it, or delete the port forwarding rules that point at this instance, then try again.")
+		return
+	}
+	if client.HasCode(err, client.CodeInstanceBehindLoadBalancer) {
+		diags.AddError("Instance is behind a load balancer",
+			err.Error()+"\n\nRemove the instance from the instance_ids of every pantechdynamics_load_balancer that targets it, or delete those load balancers, then try again.")
 		return
 	}
 	addAPIError(diags, "Error deleting instance", err)

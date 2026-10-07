@@ -208,7 +208,8 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	}
 	if err != nil {
 		resourcekit.AddHintedError(&resp.Diagnostics, "Error deleting subnet", err, map[string]string{
-			client.CodeInvalidResourceState: "A subnet cannot be deleted while instances are still in it. Remove those first, then try again.",
+			client.CodeInvalidResourceState:        "A subnet cannot be deleted while instances are still in it. Remove those first, then try again.",
+			client.CodeSubnetHasKubernetesClusters: "Kubernetes clusters still run in this subnet. Delete them first (a pantechdynamics_kubernetes_cluster that uses this subnet_id depends on it, so Terraform destroys it first), then try again.",
 		})
 		return
 	}

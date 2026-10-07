@@ -156,7 +156,7 @@ func newRequestSpec(method, path string, in any) (requestSpec, error) {
 }
 
 func isMutating(method string) bool {
-	return method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete
+	return method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
 }
 
 // send performs a single HTTP attempt and reads the whole body.
