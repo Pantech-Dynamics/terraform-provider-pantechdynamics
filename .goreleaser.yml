@@ -55,6 +55,12 @@ signs:
       # if you are using this in a GitHub action or some other automated pipeline, you 
       # need to pass the batch flag to indicate its not interactive.
       - "--batch"
+      # CI has no terminal to ask for the key's passphrase on ("Inappropriate
+      # ioctl for device"), so it is passed in directly from the PASSPHRASE secret.
+      - "--pinentry-mode"
+      - "loopback"
+      - "--passphrase"
+      - "{{ .Env.PASSPHRASE }}"
       - "--local-user"
       - "{{ .Env.GPG_FINGERPRINT }}" # set this environment variable for your signing key
       - "--output"
