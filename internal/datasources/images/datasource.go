@@ -41,7 +41,7 @@ func (d *DataSource) Metadata(_ context.Context, req datasource.MetadataRequest,
 // Schema describes the attributes.
 func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in.",
+		Description: "Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in. Encrypted images have encrypted set to true.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Always \"images\". Present because every data source needs an id.",
@@ -68,6 +68,14 @@ func imageAttributes() map[string]schema.Attribute {
 			Computed:    true,
 			ElementType: types.StringType,
 			Description: "Zones the image can be used in.",
+		},
+		"encrypted": schema.BoolAttribute{
+			Computed:    true,
+			Description: "True for an encrypted image: the instance's disk, its snapshots and backups are encrypted at rest, each instance with its own key. Encrypted images are listed only once encrypted VMs are enabled for your organization (on request).",
+		},
+		"encrypted_variant_of": schema.StringAttribute{
+			Computed:    true,
+			Description: "On an encrypted image, the slug of the plain image it is the encrypted variant of, for example \"ubuntu-24-04\" for \"ubuntu-24-04-encrypted\". Null on a plain image.",
 		},
 	}
 }

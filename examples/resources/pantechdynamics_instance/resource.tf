@@ -100,3 +100,17 @@ resource "pantechdynamics_instance" "app" {
 output "app_private_network_ip" {
   value = pantechdynamics_instance.app.private_network_ip
 }
+
+# An encrypted instance: its disk, snapshots and backups are encrypted at rest,
+# with a key of its own. Use an encrypted image's slug (encrypted = true in
+# pantechdynamics_images). Encrypted VMs are enabled per organization on request,
+# and for now run as standard instances in af-abj-1 only. The first start takes a
+# little longer while the disk is encrypted. Data volumes are not encrypted
+# automatically; see the encrypted VMs guide in the documentation. The computed
+# encrypted attribute is then true.
+# resource "pantechdynamics_instance" "vault" {
+#   name       = "vault-1"
+#   plan_slug  = "individual"
+#   image_slug = "ubuntu-24-04-encrypted"
+#   ssh_key_id = pantechdynamics_ssh_key.admin.id
+# }

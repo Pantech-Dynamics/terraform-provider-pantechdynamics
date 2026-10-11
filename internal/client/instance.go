@@ -80,12 +80,15 @@ type InstanceFailure struct {
 // Instance is a virtual machine. The fields follow the live API, which differs
 // from the OpenAPI spec (it has zone, public_ipv4, private_ipv4 and spec).
 type Instance struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	PlanID          string  `json:"plan_id"`
-	PlanSlug        string  `json:"plan_slug"`
-	ImageID         string  `json:"image_id"`
-	ImageSlug       string  `json:"image_slug"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PlanID    string `json:"plan_id"`
+	PlanSlug  string `json:"plan_slug"`
+	ImageID   string `json:"image_id"`
+	ImageSlug string `json:"image_slug"`
+	// Encrypted is true for an instance made from an encrypted image. An
+	// older API does not send it, which reads as false.
+	Encrypted       bool    `json:"encrypted"`
 	Region          string  `json:"region"`
 	Zone            string  `json:"zone"`
 	NetworkID       *string `json:"network_id"`

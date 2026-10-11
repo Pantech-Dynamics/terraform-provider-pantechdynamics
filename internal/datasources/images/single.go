@@ -36,6 +36,9 @@ type singleModel struct {
 	Name    types.String   `tfsdk:"name"`
 	Version types.String   `tfsdk:"version"`
 	Zones   []types.String `tfsdk:"zones"`
+
+	Encrypted          types.Bool   `tfsdk:"encrypted"`
+	EncryptedVariantOf types.String `tfsdk:"encrypted_variant_of"`
 }
 
 // Metadata sets the type name: pantechdynamics_image.
@@ -94,5 +97,8 @@ func (d *SingleDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 	m := fromAPIResponse(images[i : i+1]).Images[0]
-	resp.Diagnostics.Append(resp.State.Set(ctx, singleModel{Slug: m.Slug, ID: m.ID, Name: m.Name, Version: m.Version, Zones: m.Zones})...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, singleModel{
+		Slug: m.Slug, ID: m.ID, Name: m.Name, Version: m.Version, Zones: m.Zones,
+		Encrypted: m.Encrypted, EncryptedVariantOf: m.EncryptedVariantOf,
+	})...)
 }

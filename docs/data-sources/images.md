@@ -3,12 +3,12 @@
 page_title: "pantechdynamics_images Data Source - pantechdynamics"
 subcategory: ""
 description: |-
-  Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in.
+  Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in. Encrypted images have encrypted set to true.
 ---
 
 # pantechdynamics_images (Data Source)
 
-Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in.
+Lists the operating system images available for instances. Use an image's slug as the image when creating an instance, and check that its zones include the zone you are creating in. Encrypted images have encrypted set to true.
 
 ## Example Usage
 
@@ -18,6 +18,12 @@ data "pantechdynamics_images" "all" {}
 # Images that can be used in a given zone.
 output "images_in_abuja_standard" {
   value = [for i in data.pantechdynamics_images.all.images : i.slug if contains(i.zones, "af-abj-1")]
+}
+
+# Encrypted images, and the plain image each one is the encrypted variant of.
+# They are listed only once encrypted VMs are enabled for your organization.
+output "encrypted_images" {
+  value = { for i in data.pantechdynamics_images.all.images : i.slug => i.encrypted_variant_of if i.encrypted }
 }
 ```
 
@@ -34,6 +40,8 @@ output "images_in_abuja_standard" {
 
 Read-Only:
 
+- `encrypted` (Boolean) True for an encrypted image: the instance's disk, its snapshots and backups are encrypted at rest, each instance with its own key. Encrypted images are listed only once encrypted VMs are enabled for your organization (on request).
+- `encrypted_variant_of` (String) On an encrypted image, the slug of the plain image it is the encrypted variant of, for example "ubuntu-24-04" for "ubuntu-24-04-encrypted". Null on a plain image.
 - `id` (String) Identifier of the image.
 - `name` (String) Operating system name, for example Ubuntu.
 - `slug` (String) Stable short name of the image, used when creating an instance.

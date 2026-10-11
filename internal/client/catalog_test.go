@@ -69,6 +69,25 @@ func TestListImages(t *testing.T) {
 	}
 }
 
+func TestListImagesDecodesEncryption(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"img_1","slug":"ubuntu-24-04","name":"Ubuntu","version":"24.04 LTS","zones":[]},
+			{"id":"img_2","slug":"ubuntu-24-04-encrypted","name":"Ubuntu (encrypted)","version":"24.04 LTS","zones":["af-abj-1"],"encrypted":true,"encrypted_variant_of":"ubuntu-24-04"}],"next_cursor":null}`))
+	})
+
+	images, err := c.ListImages(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images[0].Encrypted || images[0].EncryptedVariantOf != nil {
+		t.Errorf("an image without the fields must read as plain: %+v", images[0])
+	}
+	if !images[1].Encrypted || images[1].EncryptedVariantOf == nil || *images[1].EncryptedVariantOf != "ubuntu-24-04" {
+		t.Errorf("encrypted image = %+v", images[1])
+	}
+}
+
 func TestListRegions(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/regions" {

@@ -18,6 +18,9 @@ type imageModel struct {
 	Name    types.String   `tfsdk:"name"`
 	Version types.String   `tfsdk:"version"`
 	Zones   []types.String `tfsdk:"zones"`
+
+	Encrypted          types.Bool   `tfsdk:"encrypted"`
+	EncryptedVariantOf types.String `tfsdk:"encrypted_variant_of"`
 }
 
 // fromAPIResponse builds the state from the API's images.
@@ -34,6 +37,9 @@ func fromAPIResponse(images []client.Image) model {
 			Name:    types.StringValue(img.Name),
 			Version: types.StringValue(img.Version),
 			Zones:   zones,
+
+			Encrypted:          types.BoolValue(img.Encrypted),
+			EncryptedVariantOf: types.StringPointerValue(img.EncryptedVariantOf),
 		})
 	}
 	return m

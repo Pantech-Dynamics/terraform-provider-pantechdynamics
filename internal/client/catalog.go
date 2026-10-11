@@ -42,6 +42,11 @@ type Image struct {
 	Name    string   `json:"name"`
 	Version string   `json:"version"`
 	Zones   []string `json:"zones"`
+	// Encrypted is an image whose disk is encrypted at rest, each instance
+	// with its own key; EncryptedVariantOf is then the slug of the plain image
+	// it pairs with. An older API sends neither, which reads as plain.
+	Encrypted          bool    `json:"encrypted"`
+	EncryptedVariantOf *string `json:"encrypted_variant_of"`
 }
 
 // Placement is one kind of instance a region can host, and the zone it lands in.

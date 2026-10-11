@@ -18,6 +18,7 @@ type model struct {
 	Name            types.String   `tfsdk:"name"`
 	PlanSlug        types.String   `tfsdk:"plan_slug"`
 	ImageSlug       types.String   `tfsdk:"image_slug"`
+	Encrypted       types.Bool     `tfsdk:"encrypted"`
 	SSHKeyID        types.String   `tfsdk:"ssh_key_id"`
 	Region          types.String   `tfsdk:"region"`
 	SecurityGroupID types.String   `tfsdk:"security_group_id"`
@@ -85,6 +86,7 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		Name:            types.StringValue(inst.Name),
 		PlanSlug:        types.StringValue(inst.PlanSlug),
 		ImageSlug:       types.StringValue(inst.ImageSlug),
+		Encrypted:       types.BoolValue(inst.Encrypted),
 		SSHKeyID:        sshKey,
 		Region:          types.StringValue(inst.Region),
 		SecurityGroupID: types.StringValue(inst.SecurityGroupID),
@@ -117,6 +119,7 @@ func pendingModel(plan model, id string) model {
 		Name:            plan.Name,
 		PlanSlug:        plan.PlanSlug,
 		ImageSlug:       plan.ImageSlug,
+		Encrypted:       types.BoolNull(),
 		SSHKeyID:        nullIfUnknown(plan.SSHKeyID),
 		Region:          nullIfUnknown(plan.Region),
 		SecurityGroupID: nullIfUnknown(plan.SecurityGroupID),

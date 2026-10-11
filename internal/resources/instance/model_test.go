@@ -73,6 +73,19 @@ func TestFromAPIResponse(t *testing.T) {
 	}
 }
 
+func TestFromAPIResponseEncrypted(t *testing.T) {
+	inst := running("vm_1", "web")
+	m, _ := fromAPIResponse(ctx, model{}, &inst)
+	if m.Encrypted.IsNull() || m.Encrypted.ValueBool() {
+		t.Fatalf("encrypted = %v, want false for a plain instance", m.Encrypted)
+	}
+	inst.ImageSlug, inst.Encrypted = "ubuntu-24-04-encrypted", true
+	m, _ = fromAPIResponse(ctx, model{}, &inst)
+	if !m.Encrypted.ValueBool() {
+		t.Fatalf("encrypted = %v, want true", m.Encrypted)
+	}
+}
+
 func TestFromAPIResponseUnknownSSHKeyBecomesNull(t *testing.T) {
 	inst := running("vm_1", "web")
 	m, _ := fromAPIResponse(ctx, model{SSHKeyID: types.StringUnknown()}, &inst)
@@ -97,6 +110,7 @@ func TestPendingModelHasNoUnknownValues(t *testing.T) {
 	}{
 		{"id", m.ID}, {"region", m.Region}, {"security_group_id", m.SecurityGroupID}, {"tags", m.Tags}, {"observed_state", m.ObservedState},
 		{"zone", m.Zone}, {"public_ipv4", m.PublicIPv4}, {"private_ipv4", m.PrivateIPv4}, {"created_at", m.CreatedAt}, {"updated_at", m.UpdatedAt},
+		{"encrypted", m.Encrypted},
 	}
 	for _, u := range unknowns {
 		if u.v.IsUnknown() {

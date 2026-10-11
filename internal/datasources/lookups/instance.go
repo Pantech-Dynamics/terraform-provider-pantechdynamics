@@ -35,6 +35,7 @@ type instanceModel struct {
 	Name            types.String `tfsdk:"name"`
 	PlanSlug        types.String `tfsdk:"plan_slug"`
 	ImageSlug       types.String `tfsdk:"image_slug"`
+	Encrypted       types.Bool   `tfsdk:"encrypted"`
 	Region          types.String `tfsdk:"region"`
 	Zone            types.String `tfsdk:"zone"`
 	NetworkID       types.String `tfsdk:"network_id"`
@@ -74,6 +75,7 @@ func (d *InstanceDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 		attrs[name] = schema.StringAttribute{Computed: true, Description: desc}
 	}
 	attrs["tags"] = schema.MapAttribute{Computed: true, ElementType: types.StringType, Description: "Key and value labels of the instance."}
+	attrs["encrypted"] = schema.BoolAttribute{Computed: true, Description: "Whether the instance was made from an encrypted image, so its disk is encrypted at rest."}
 	resp.Schema = schema.Schema{
 		Description: "Looks up one existing instance by id or name, for example to point a public IP, volume or database access rule at a machine Terraform does not manage. Deleted instances are not found.",
 		Attributes:  attrs,
@@ -121,7 +123,7 @@ func (d *InstanceDataSource) Read(ctx context.Context, req datasource.ReadReques
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, instanceModel{
 		ID: types.StringValue(inst.ID), Name: types.StringValue(inst.Name), PlanSlug: types.StringValue(inst.PlanSlug),
-		ImageSlug: types.StringValue(inst.ImageSlug), Region: types.StringValue(inst.Region), Zone: types.StringValue(inst.Zone),
+		ImageSlug: types.StringValue(inst.ImageSlug), Encrypted: types.BoolValue(inst.Encrypted), Region: types.StringValue(inst.Region), Zone: types.StringValue(inst.Zone),
 		NetworkID: resourcekit.OptionalString(inst.NetworkID), SubnetID: resourcekit.OptionalString(inst.SubnetID),
 		SecurityGroupID: types.StringValue(inst.SecurityGroupID), PublicIPv4: resourcekit.OptionalString(inst.PublicIPv4),
 		PrivateIPv4: resourcekit.OptionalString(inst.PrivateIPv4), DesiredState: types.StringValue(inst.DesiredState),

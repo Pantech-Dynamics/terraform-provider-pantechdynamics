@@ -30,3 +30,13 @@ make generate  # regenerate docs/
 ```
 
 For local testing, build with `go install` and point `dev_overrides` in `~/.terraformrc` at `$GOPATH/bin`.
+
+## Releasing
+
+Changes add a line under **Unreleased** in [`CHANGELOG.md`](CHANGELOG.md). To
+release, rename that heading to the version and date (`## 0.3.0 (2026-11-02)`),
+keep an empty `## Unreleased` above it, and merge to `main`.
+`.github/workflows/auto-release.yml` sees a version that has no `v` tag yet,
+tags it (`v0.3.0`), and runs `release.yml`: tests, then a GPG-signed GoReleaser
+release on GitHub, which the Terraform Registry picks up. A push whose newest
+version is already tagged releases nothing. Pushing a tag by hand still works.

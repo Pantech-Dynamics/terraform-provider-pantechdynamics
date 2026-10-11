@@ -7,6 +7,15 @@ on:
   push:
     tags:
       - 'v*'
+  # Called by auto-release.yml when a push to main adds a new version to
+  # CHANGELOG.md (a tag pushed with GITHUB_TOKEN cannot trigger this
+  # workflow itself, so it is called directly with the version it tagged).
+  workflow_call:
+    inputs:
+      version:
+        description: The tag to release, such as v0.3.0
+        required: true
+        type: string
 
 # Releases need permissions to read and write the repository contents.
 # GitHub considers creating releases and uploading assets as writing contents.
@@ -19,12 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.version || github.ref_name }}
           # Allow goreleaser to access older tag information.
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
           cache: true
+      - name: Test before publishing
+        run: go test ./...
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         id: import_gpg

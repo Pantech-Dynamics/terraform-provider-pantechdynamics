@@ -100,6 +100,11 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
+			"encrypted": schema.BoolAttribute{
+				Description:   "Whether the instance was made from an encrypted image (encrypted = true in pantechdynamics_images): its disk, snapshots and backups are encrypted at rest, with a key of its own.",
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
 			"ssh_key_id": schema.StringAttribute{
 				Description: "Id of the SSH key to install, from pantechdynamics_ssh_key. The API does not report which key an instance was created with, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Changing it replaces the instance.",
 				Optional:    true,

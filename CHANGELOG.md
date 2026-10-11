@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+## 0.3.0 (2026-10-11)
+
+FEATURES:
+
+- Encrypted instances. `pantechdynamics_images` and `pantechdynamics_image`: new read-only `encrypted` (true for an encrypted image, whose instance disk, snapshots and backups are encrypted at rest, each instance with its own key) and `encrypted_variant_of` (on an encrypted image, the slug of the plain image it pairs with, for example `ubuntu-24-04` for `ubuntu-24-04-encrypted`; null otherwise). Create an encrypted instance by setting `image_slug` to an encrypted image's slug. Encrypted images are listed only once encrypted VMs are enabled for your organization (on request); otherwise the slug is refused with `IMAGE_NOT_FOUND`. An older API that sends neither field reads as plain.
+- `pantechdynamics_instance` resource and data source: new read-only `encrypted`, true for an instance made from an encrypted image.
+
 ## 0.2.0 (2026-10-08)
 
 FEATURES:
