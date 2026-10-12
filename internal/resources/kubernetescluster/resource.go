@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -123,12 +122,20 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				)},
 			},
 			"control_nodes": schema.Int64Attribute{
-				Description:   "Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.",
-				Optional:      true,
-				Computed:      true,
-				Default:       int64default.StaticInt64(1),
-				PlanModifiers: []planmodifier.Int64{int64planmodifier.RequiresReplace()},
-				Validators:    []validator.Int64{controlNodesValidator{}},
+				Description: "Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.",
+				Optional:    true,
+				Computed:    true,
+				// The backend assigns 1 when control_nodes is omitted, and reports
+				// the count on read. UseStateForUnknown holds that value across a
+				// plan that omits it, and RequiresReplaceIfConfigured replaces the
+				// cluster only when a configured value changes, so an import or a
+				// removed argument no longer destroys it. A static Default would be
+				// re-applied over the read value and force that destroy.
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+					int64planmodifier.RequiresReplaceIfConfigured(),
+				},
+				Validators: []validator.Int64{controlNodesValidator{}},
 			},
 			"workers": schema.Int64Attribute{
 				Description:   "A fixed number of worker nodes, 1 to 10. Required unless autoscaling is enabled, and must not be set while it is: the autoscaler then owns the count, which is reported here and never causes a diff. Changes in place by scaling the cluster, which must be running. Added workers are billed as VMs of node_plan. To go from autoscaling back to a fixed count, remove autoscaling and set workers.",
