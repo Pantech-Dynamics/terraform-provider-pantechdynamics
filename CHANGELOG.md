@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+FEATURES:
+
+- `pantechdynamics_volume`: new `encrypted` (optional bool, default false, changing it replaces the volume) creates an encrypted volume, and new read-only `encryption_status` (`none`, `requested` or `encrypted`) says where it is. A new encrypted volume is `requested`: the disk is encrypted when the Pantech agent formats it inside the instance, and the platform sets `encrypted` only after confirming it. `encrypted` cannot be combined with `source_snapshot_id`. A platform that does not support encrypted volumes yet fails the create with a clear error instead of leaving a plain volume that Terraform believes is encrypted.
+- `pantechdynamics_volume`: `storage_type` and the example now describe local volumes accurately: a local volume's disk is on one host and Pantech moves it to the instance's host on attach.
+
 ## 0.3.0 (2026-10-11)
 
 FEATURES:

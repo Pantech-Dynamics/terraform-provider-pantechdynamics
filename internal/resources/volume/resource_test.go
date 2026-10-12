@@ -52,6 +52,8 @@ func values(s schema.Schema, set map[string]tftypes.Value) tftypes.Value {
 
 func str(v string) tftypes.Value { return tftypes.NewValue(tftypes.String, v) }
 
+func boolean(v bool) tftypes.Value { return tftypes.NewValue(tftypes.Bool, v) }
+
 func num(v int64) tftypes.Value { return tftypes.NewValue(tftypes.Number, v) }
 
 func unknownStr() tftypes.Value { return tftypes.NewValue(tftypes.String, tftypes.UnknownValue) }
@@ -738,4 +740,74 @@ func TestDelete(t *testing.T) {
 			t.Fatal(errorText(resp.Diagnostics))
 		}
 	})
+}
+
+// --- encrypted volumes (docs: the disk is encrypted when the agent formats it, so a new volume is "requested") ---
+
+func TestCreateEncryptedVolume(t *testing.T) {
+	s := testSchema(t)
+	create := func(api *fakeAPI, over map[string]tftypes.Value) resource.CreateResponse {
+		resp := resource.CreateResponse{State: emptyState(s)}
+		newTestResource(api).Create(ctx, resource.CreateRequest{Plan: createPlan(s, over)}, &resp)
+		return resp
+	}
+
+	t.Run("asks for it, and reports requested until the agent formats the disk", func(t *testing.T) {
+		api := seeded()
+		resp := create(api, map[string]tftypes.Value{"encrypted": boolean(true)})
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		m := getModel(t, resp.State)
+		if !api.lastCreate.Encrypted || !m.Encrypted.ValueBool() || m.EncryptionStatus.ValueString() != client.EncryptionRequested {
+			t.Fatalf("sent encrypted = %v, state encrypted = %v status = %q, want true, true, requested", api.lastCreate.Encrypted, m.Encrypted.ValueBool(), m.EncryptionStatus.ValueString())
+		}
+	})
+
+	t.Run("a plain volume says none and does not send the field", func(t *testing.T) {
+		api := seeded()
+		resp := create(api, map[string]tftypes.Value{"encrypted": boolean(false)})
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		m := getModel(t, resp.State)
+		if api.lastCreate.Encrypted || m.Encrypted.ValueBool() || m.EncryptionStatus.ValueString() != client.EncryptionNone {
+			t.Fatalf("sent encrypted = %v, state encrypted = %v status = %q, want false, false, none", api.lastCreate.Encrypted, m.Encrypted.ValueBool(), m.EncryptionStatus.ValueString())
+		}
+	})
+
+	t.Run("a platform that made a plain volume is an error, not a silent downgrade", func(t *testing.T) {
+		api := seeded()
+		api.ignoresEncrypted = true
+		resp := create(api, map[string]tftypes.Value{"encrypted": boolean(true)})
+		if !strings.Contains(errorText(resp.Diagnostics), "did not create an encrypted volume") {
+			t.Fatalf("diagnostics = %s, want the volume reported as not encrypted", errorText(resp.Diagnostics))
+		}
+		if resp.State.Raw.IsNull() || getModel(t, resp.State).ID.ValueString() != "vol_1" {
+			t.Fatal("the volume exists: state must keep its id so the next apply replaces it")
+		}
+	})
+}
+
+func TestValidateConfigRefusesEncryptedFromASnapshot(t *testing.T) {
+	s := testSchema(t)
+	validate := func(over map[string]tftypes.Value) validateResult {
+		resp := resource.ValidateConfigResponse{}
+		(&Resource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: s, Raw: values(s, over)}}, &resp)
+		return validateResult{errs: errorText(resp.Diagnostics), onEncrypted: attachedTo(resp.Diagnostics, path.Root("encrypted"))}
+	}
+	if r := validate(map[string]tftypes.Value{"encrypted": boolean(true), "source_snapshot_id": str("snap_1")}); r.errs == "" || !r.onEncrypted {
+		t.Errorf("encrypted with a snapshot: %+v, want an error on encrypted", r)
+	}
+	if r := validate(map[string]tftypes.Value{"encrypted": boolean(true)}); r.errs != "" {
+		t.Errorf("encrypted alone: %+v, want valid", r)
+	}
+	if r := validate(map[string]tftypes.Value{"source_snapshot_id": str("snap_1")}); r.errs != "" {
+		t.Errorf("a snapshot restore without encrypted: %+v, want valid", r)
+	}
+}
+
+type validateResult struct {
+	errs        string
+	onEncrypted bool
 }

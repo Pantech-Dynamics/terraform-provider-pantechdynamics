@@ -71,6 +71,7 @@ resource "pantechdynamics_volume" "restored" {
 
 ### Optional
 
+- `encrypted` (Boolean) Create an encrypted volume. Defaults to false. Changing it replaces the volume, because an existing volume cannot be converted. The disk is encrypted when the Pantech agent formats it inside the instance, not when it is created or attached: encryption_status says where it is. Cannot be combined with source_snapshot_id, because a volume restored from a snapshot takes its encryption from the snapshot.
 - `instance_id` (String) Id of the instance the volume is attached to, from pantechdynamics_instance. The instance must be running and in the volume's zone. Setting it attaches the volume, changing it moves the volume, and removing it detaches the volume. Unmount the disk inside the instance before detaching, or the data may be damaged. Null means not attached. Destroying the volume detaches it first.
 - `mount_point` (String) An absolute path such as /data, stored with the volume as a label. The platform does not mount anything. Changing it replaces the volume.
 - `region` (String) Region to create the volume in, for example af-abj. Defaults to the platform's default region. Changing it replaces the volume.
@@ -82,10 +83,11 @@ resource "pantechdynamics_volume" "restored" {
 
 - `created_at` (String) When the volume was created, in RFC 3339 UTC, to the second.
 - `currency` (String) Currency of monthly_cost_minor.
+- `encryption_status` (String) What the platform can truthfully say about the volume's encryption: "none" (a plain volume), "requested" (created as encrypted, not formatted yet), or "encrypted" (the platform confirmed the disk was formatted with a key from its volume key service). Only the platform sets it; it changes outside Terraform when the agent formats the disk.
 - `id` (String) Identifier of the volume, starting with vol_.
 - `monthly_cost_minor` (Number) Estimated cost for a full month, in minor currency units (for example kobo). An estimate, not a quote.
 - `observed_state` (String) State of the volume as the platform sees it, for example "active".
-- `storage_type` (String) "shared" or "local". Local volumes attached to instances on staging, shared ones did not.
+- `storage_type` (String) "local" or "shared". A local volume's disk lives on one host; Pantech moves it to the host of the instance you attach it to.
 - `updated_at` (String) When the volume was last changed, in RFC 3339 UTC, to the second.
 - `zone` (String) Zone the volume lives in, for example af-abj-1.
 

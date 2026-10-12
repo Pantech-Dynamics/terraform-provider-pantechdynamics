@@ -13,6 +13,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -49,10 +51,11 @@ type volumeAPI interface {
 }
 
 var (
-	_ resource.Resource                = &Resource{}
-	_ resource.ResourceWithConfigure   = &Resource{}
-	_ resource.ResourceWithImportState = &Resource{}
-	_ resource.ResourceWithModifyPlan  = &Resource{}
+	_ resource.Resource                   = &Resource{}
+	_ resource.ResourceWithConfigure      = &Resource{}
+	_ resource.ResourceWithImportState    = &Resource{}
+	_ resource.ResourceWithModifyPlan     = &Resource{}
+	_ resource.ResourceWithValidateConfig = &Resource{}
 )
 
 // Resource manages one volume.
@@ -126,8 +129,23 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{mountPointCheck},
 			},
+			"encrypted": schema.BoolAttribute{
+				Description: "Create an encrypted volume. Defaults to false. Changing it replaces the volume, because an existing volume cannot be converted. " +
+					"The disk is encrypted when the Pantech agent formats it inside the instance, not when it is created or attached: " +
+					"encryption_status says where it is. Cannot be combined with source_snapshot_id, because a volume restored from a snapshot takes its encryption from the snapshot.",
+				Optional:      true,
+				Computed:      true,
+				Default:       booldefault.StaticBool(false),
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
+			},
+			"encryption_status": schema.StringAttribute{
+				Description: "What the platform can truthfully say about the volume's encryption: \"none\" (a plain volume), \"requested\" " +
+					"(created as encrypted, not formatted yet), or \"encrypted\" (the platform confirmed the disk was formatted with a key from its volume key service). " +
+					"Only the platform sets it; it changes outside Terraform when the agent formats the disk.",
+				Computed: true,
+			},
 			"storage_type": schema.StringAttribute{
-				Description:   "\"shared\" or \"local\". Local volumes attached to instances on staging, shared ones did not.",
+				Description:   "\"local\" or \"shared\". A local volume's disk lives on one host; Pantech moves it to the host of the instance you attach it to.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
@@ -174,6 +192,22 @@ func (r *Resource) Configure(_ context.Context, req resource.ConfigureRequest, r
 		return
 	}
 	r.api = api
+}
+
+// ValidateConfig refuses an encrypted volume restored from a snapshot: the restore takes its
+// encryption from the snapshot, and the platform's restore request has no encrypted option.
+func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var encrypted types.Bool
+	var snapshot types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("encrypted"), &encrypted)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("source_snapshot_id"), &snapshot)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if encrypted.ValueBool() && !snapshot.IsNull() {
+		resp.Diagnostics.AddAttributeError(path.Root("encrypted"), "encrypted cannot be used with source_snapshot_id",
+			"A volume restored from a snapshot takes its encryption from the snapshot: restoring a snapshot of an encrypted volume gives an encrypted volume that is re-keyed on first use. Remove encrypted, or create the volume without source_snapshot_id.")
+	}
 }
 
 // ModifyPlan refuses a resize of an attached volume at plan time. The platform
@@ -252,7 +286,18 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() || knownString(plan.InstanceID) == "" {
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if plan.Encrypted.ValueBool() && modelFromState(ctx, resp.State).EncryptionStatus.ValueString() == client.EncryptionNone {
+		// A backend that does not know encrypted volumes ignores the field and makes a plain one.
+		// Failing taints the resource, so the next apply replaces it, instead of leaving a plain
+		// volume that Terraform believes is encrypted.
+		resp.Diagnostics.AddError("The platform did not create an encrypted volume",
+			"The volume "+id+" was created without encryption. Encrypted volumes may not be available to your organization yet; ask Pantech support to enable them, then apply again.")
+		return
+	}
+	if knownString(plan.InstanceID) == "" {
 		return
 	}
 
