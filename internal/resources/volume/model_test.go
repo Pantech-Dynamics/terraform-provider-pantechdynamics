@@ -100,3 +100,36 @@ func TestPendingModelHasNoUnknownValues(t *testing.T) {
 		t.Fatalf("instance_id = %v: the volume is not attached at this point", m.InstanceID)
 	}
 }
+
+func TestFromAPIResponseEncryption(t *testing.T) {
+	enc := func(status string) *client.Volume {
+		v := &client.Volume{ID: "vol_1", Name: "data", ObservedState: client.VolumeActive}
+		if status != "" {
+			v.Encryption = &client.VolumeEncryption{Status: status}
+		}
+		return v
+	}
+	cases := []struct {
+		name          string
+		prev          model
+		vol           *client.Volume
+		wantEncrypted bool
+		wantStatus    string
+	}{
+		{"a backend without the field means none", model{}, enc(""), false, "none"},
+		{"none", model{}, enc("none"), false, "none"},
+		{"requested", model{}, enc("requested"), true, "requested"},
+		{"encrypted", model{}, enc("encrypted"), true, "encrypted"},
+		{"the configured value is kept: a restore of an encrypted snapshot is requested without being asked for",
+			model{Encrypted: types.BoolValue(false)}, enc("requested"), false, "requested"},
+	}
+	for _, tc := range cases {
+		got := fromAPIResponse(tc.prev, tc.vol)
+		if got.Encrypted.ValueBool() != tc.wantEncrypted || got.EncryptionStatus.ValueString() != tc.wantStatus {
+			t.Errorf("%s: encrypted = %v status = %q, want %v %q", tc.name, got.Encrypted.ValueBool(), got.EncryptionStatus.ValueString(), tc.wantEncrypted, tc.wantStatus)
+		}
+	}
+	if req := toCreateRequest(model{Encrypted: types.BoolValue(true)}); !req.Encrypted {
+		t.Error("toCreateRequest dropped encrypted")
+	}
+}

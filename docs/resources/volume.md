@@ -13,8 +13,9 @@ A block storage volume, billed by the hour. It can be attached to one running in
 ## Example Usage
 
 ```terraform
-# A volume is billed by the hour. Look up the offerings first: each has a storage
-# type, shared or local, and on staging only local volumes attached to instances.
+# A volume is billed by the hour. Look up the offerings first: each has a size and a
+# storage type. A local volume's disk lives on one host; Pantech moves it to the host
+# of the instance you attach it to.
 data "pantechdynamics_disk_offerings" "all" {}
 
 # A standalone volume on a fixed offering. The offering sets the size.
@@ -39,6 +40,22 @@ resource "pantechdynamics_volume" "data" {
     update = "30m"
     delete = "20m"
   }
+}
+
+# An encrypted volume. It is created as "requested": the disk is encrypted when the
+# Pantech agent formats it inside the instance (see the encrypted volumes guide in the
+# documentation), and encryption_status becomes "encrypted" once the platform has
+# confirmed it. Changing encrypted replaces the volume. It cannot be combined with
+# source_snapshot_id.
+resource "pantechdynamics_volume" "secure" {
+  name               = "secure"
+  disk_offering_slug = "small-local-20gb"
+  encrypted          = true
+  instance_id        = pantechdynamics_instance.web.id
+}
+
+output "secure_volume_encryption" {
+  value = pantechdynamics_volume.secure.encryption_status
 }
 
 # A customized offering takes its size from size_gb. A fixed offering has its own
@@ -71,6 +88,7 @@ resource "pantechdynamics_volume" "restored" {
 
 ### Optional
 
+- `encrypted` (Boolean) Create an encrypted volume. Defaults to false. Changing it replaces the volume, because an existing volume cannot be converted. The disk is encrypted when the Pantech agent formats it inside the instance, not when it is created or attached: encryption_status says where it is. Cannot be combined with source_snapshot_id, because a volume restored from a snapshot takes its encryption from the snapshot.
 - `instance_id` (String) Id of the instance the volume is attached to, from pantechdynamics_instance. The instance must be running and in the volume's zone. Setting it attaches the volume, changing it moves the volume, and removing it detaches the volume. Unmount the disk inside the instance before detaching, or the data may be damaged. Null means not attached. Destroying the volume detaches it first.
 - `mount_point` (String) An absolute path such as /data, stored with the volume as a label. The platform does not mount anything. Changing it replaces the volume.
 - `region` (String) Region to create the volume in, for example af-abj. Defaults to the platform's default region. Changing it replaces the volume.
@@ -82,10 +100,11 @@ resource "pantechdynamics_volume" "restored" {
 
 - `created_at` (String) When the volume was created, in RFC 3339 UTC, to the second.
 - `currency` (String) Currency of monthly_cost_minor.
+- `encryption_status` (String) What the platform can truthfully say about the volume's encryption: "none" (a plain volume), "requested" (created as encrypted, not formatted yet), or "encrypted" (the platform confirmed the disk was formatted with a key from its volume key service). Only the platform sets it; it changes outside Terraform when the agent formats the disk.
 - `id` (String) Identifier of the volume, starting with vol_.
 - `monthly_cost_minor` (Number) Estimated cost for a full month, in minor currency units (for example kobo). An estimate, not a quote.
 - `observed_state` (String) State of the volume as the platform sees it, for example "active".
-- `storage_type` (String) "shared" or "local". Local volumes attached to instances on staging, shared ones did not.
+- `storage_type` (String) "local" or "shared". A local volume's disk lives on one host; Pantech moves it to the host of the instance you attach it to.
 - `updated_at` (String) When the volume was last changed, in RFC 3339 UTC, to the second.
 - `zone` (String) Zone the volume lives in, for example af-abj-1.
 

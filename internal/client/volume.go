@@ -21,25 +21,41 @@ type Money struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 
+// VolumeEncryption is what the platform can truthfully say about a volume's encryption:
+// "none", "requested" (asked for at creation, not formatted yet) or "encrypted" (the
+// platform confirmed the disk was formatted with a key from the volume key service).
+type VolumeEncryption struct {
+	Status string `json:"status"`
+}
+
+// Volume states of encryption in VolumeEncryption.Status.
+const (
+	EncryptionNone      = "none"
+	EncryptionRequested = "requested"
+	EncryptionEncrypted = "encrypted"
+)
+
 // Volume is a block storage disk. The fields follow the live API.
 type Volume struct {
-	ID                   string     `json:"id"`
-	Name                 string     `json:"name"`
-	SizeGB               int64      `json:"size_gb"`
-	DiskOfferingSlug     string     `json:"disk_offering_slug"`
-	StorageType          *string    `json:"storage_type"`
-	Region               *string    `json:"region"`
-	Zone                 *string    `json:"zone"`
-	AttachedInstanceID   *string    `json:"attached_instance_id"`
-	AttachedInstanceName *string    `json:"attached_instance_name"`
-	DesiredInstanceID    *string    `json:"desired_instance_id"`
-	MountPoint           *string    `json:"mount_point"`
-	SourceSnapshotID     *string    `json:"source_snapshot_id"`
-	MonthlyCost          *Money     `json:"monthly_cost"`
-	DesiredState         string     `json:"desired_state"`
-	ObservedState        string     `json:"observed_state"`
-	CreatedAt            *time.Time `json:"created_at"`
-	UpdatedAt            *time.Time `json:"updated_at"`
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	SizeGB               int64   `json:"size_gb"`
+	DiskOfferingSlug     string  `json:"disk_offering_slug"`
+	StorageType          *string `json:"storage_type"`
+	Region               *string `json:"region"`
+	Zone                 *string `json:"zone"`
+	AttachedInstanceID   *string `json:"attached_instance_id"`
+	AttachedInstanceName *string `json:"attached_instance_name"`
+	DesiredInstanceID    *string `json:"desired_instance_id"`
+	MountPoint           *string `json:"mount_point"`
+	SourceSnapshotID     *string `json:"source_snapshot_id"`
+	// Encryption is absent from a backend that predates encrypted volumes.
+	Encryption    *VolumeEncryption `json:"encryption"`
+	MonthlyCost   *Money            `json:"monthly_cost"`
+	DesiredState  string            `json:"desired_state"`
+	ObservedState string            `json:"observed_state"`
+	CreatedAt     *time.Time        `json:"created_at"`
+	UpdatedAt     *time.Time        `json:"updated_at"`
 }
 
 // CreateVolumeRequest orders a volume. SizeGB is needed only for a customized
@@ -51,6 +67,9 @@ type CreateVolumeRequest struct {
 	Region           string `json:"region,omitempty"`
 	InstanceID       string `json:"instance_id,omitempty"`
 	MountPoint       string `json:"mount_point,omitempty"`
+	// Encrypted asks for an encrypted volume. The disk is encrypted when the Pantech agent
+	// formats it inside the instance; the volume reports "requested" until then.
+	Encrypted bool `json:"encrypted,omitempty"`
 }
 
 // resizeVolumeRequest grows a volume to an offering or, for a customized one, a size.

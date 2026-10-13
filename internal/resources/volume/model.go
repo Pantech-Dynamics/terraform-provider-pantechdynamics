@@ -19,6 +19,8 @@ type model struct {
 	Region           types.String   `tfsdk:"region"`
 	InstanceID       types.String   `tfsdk:"instance_id"`
 	SourceSnapshotID types.String   `tfsdk:"source_snapshot_id"`
+	Encrypted        types.Bool     `tfsdk:"encrypted"`
+	EncryptionStatus types.String   `tfsdk:"encryption_status"`
 	MountPoint       types.String   `tfsdk:"mount_point"`
 	StorageType      types.String   `tfsdk:"storage_type"`
 	Zone             types.String   `tfsdk:"zone"`
@@ -40,6 +42,7 @@ func toCreateRequest(m model) client.CreateVolumeRequest {
 		SizeGB:           knownInt(m.SizeGB),
 		Region:           knownString(m.Region),
 		MountPoint:       knownString(m.MountPoint),
+		Encrypted:        m.Encrypted.ValueBool(),
 	}
 }
 
@@ -62,7 +65,20 @@ func knownInt(v types.Int64) int64 {
 // attach leaves a desired instance but no attachment. prev supplies only the
 // timeouts block, which exists in Terraform alone.
 func fromAPIResponse(prev model, v *client.Volume) model {
+	status := client.EncryptionNone
+	if v.Encryption != nil && v.Encryption.Status != "" {
+		status = v.Encryption.Status
+	}
+	// encrypted is what was asked for. Keep the configured value so a volume restored from an
+	// encrypted snapshot (encryption_status "requested" without being asked for) does not
+	// plan a replacement; with no prior value (an import) it follows the platform.
+	encrypted := types.BoolValue(status != client.EncryptionNone)
+	if !prev.Encrypted.IsNull() && !prev.Encrypted.IsUnknown() {
+		encrypted = prev.Encrypted
+	}
 	m := model{
+		Encrypted:        encrypted,
+		EncryptionStatus: types.StringValue(status),
 		ID:               types.StringValue(v.ID),
 		Name:             types.StringValue(v.Name),
 		DiskOfferingSlug: types.StringValue(v.DiskOfferingSlug),
@@ -99,6 +115,8 @@ func pendingModel(plan model, id string) model {
 		Region:           nullIfUnknown(plan.Region),
 		InstanceID:       types.StringNull(), // not attached yet
 		SourceSnapshotID: nullIfUnknown(plan.SourceSnapshotID),
+		Encrypted:        plan.Encrypted,
+		EncryptionStatus: types.StringNull(),
 		MountPoint:       nullIfUnknown(plan.MountPoint),
 		StorageType:      types.StringNull(),
 		Zone:             types.StringNull(),

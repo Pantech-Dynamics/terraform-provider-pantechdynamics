@@ -30,6 +30,10 @@ type fakeAPI struct {
 
 	restoreFails bool // a restore ends with a failed volume, as every restore did on staging
 
+	// ignoresEncrypted makes the fake behave like a backend that predates encrypted volumes: it
+	// accepts the encrypted field and creates a plain volume.
+	ignoresEncrypted bool
+
 	nextID, creates, restores, attaches, detaches, redundantDetaches, resizes, deletes, refused int
 	lastRestore                                                                                 restoreCall
 	lastCreate                                                                                  client.CreateVolumeRequest
@@ -100,6 +104,9 @@ func (f *fakeAPI) CreateVolume(_ context.Context, req client.CreateVolumeRequest
 	v := volume(id, req.Name, req.DiskOfferingSlug, size, storage)
 	if req.MountPoint != "" {
 		v.MountPoint = ptr(req.MountPoint)
+	}
+	if req.Encrypted && !f.ignoresEncrypted {
+		v.Encryption = &client.VolumeEncryption{Status: client.EncryptionRequested}
 	}
 	f.volumes = append(f.volumes, v)
 	if f.createErr != nil {
