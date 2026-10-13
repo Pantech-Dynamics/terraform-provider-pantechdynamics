@@ -13,8 +13,9 @@ A block storage volume, billed by the hour. It can be attached to one running in
 ## Example Usage
 
 ```terraform
-# A volume is billed by the hour. Look up the offerings first: each has a storage
-# type, shared or local, and on staging only local volumes attached to instances.
+# A volume is billed by the hour. Look up the offerings first: each has a size and a
+# storage type. A local volume's disk lives on one host; Pantech moves it to the host
+# of the instance you attach it to.
 data "pantechdynamics_disk_offerings" "all" {}
 
 # A standalone volume on a fixed offering. The offering sets the size.
@@ -39,6 +40,22 @@ resource "pantechdynamics_volume" "data" {
     update = "30m"
     delete = "20m"
   }
+}
+
+# An encrypted volume. It is created as "requested": the disk is encrypted when the
+# Pantech agent formats it inside the instance (see the encrypted volumes guide in the
+# documentation), and encryption_status becomes "encrypted" once the platform has
+# confirmed it. Changing encrypted replaces the volume. It cannot be combined with
+# source_snapshot_id.
+resource "pantechdynamics_volume" "secure" {
+  name               = "secure"
+  disk_offering_slug = "small-local-20gb"
+  encrypted          = true
+  instance_id        = pantechdynamics_instance.web.id
+}
+
+output "secure_volume_encryption" {
+  value = pantechdynamics_volume.secure.encryption_status
 }
 
 # A customized offering takes its size from size_gb. A fixed offering has its own
