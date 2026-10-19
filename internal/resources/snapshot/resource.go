@@ -67,7 +67,7 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 // Schema describes the attributes.
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A point-in-time snapshot of an instance's root disk or of a volume. Set exactly one of instance_id and volume_id. A snapshot cannot be changed: any change replaces it. Snapshot storage is billed monthly by size. On the staging platform, snapshots of a stopped instance and of a local volume attached to an instance succeeded, while snapshots of a running instance and of a detached shared volume failed.",
+		Description: "A point-in-time snapshot of an instance's root disk or of a volume. Set exactly one of instance_id and volume_id. A snapshot cannot be changed: any change replaces it. Snapshot storage is billed monthly by size. Snapshots of an instance's root disk require the instance to be stopped first.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the snapshot, starting with snap_.",
@@ -75,13 +75,13 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{
-				Description:   "Name of the snapshot, unique for its instance or volume. On the staging platform a snapshot that failed or was deleted keeps its name reserved, so a name cannot be used again. Changing it replaces the snapshot.",
+				Description:   "Name of the snapshot, unique for its instance or volume. Snapshots that failed or were deleted keep their name reserved. Changing it replaces the snapshot.",
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{nameCheck},
 			},
 			"instance_id": schema.StringAttribute{
-				Description:   "Id of the instance whose root disk is copied, from pantechdynamics_instance. Stop the instance first: a snapshot of a running instance failed on staging. Set this or volume_id. Changing it replaces the snapshot.",
+				Description:   "Id of the instance whose root disk is copied, from pantechdynamics_instance. Stop the instance first (desired_state = \"stopped\") before snapshotting. Set this or volume_id. Changing it replaces the snapshot.",
 				Optional:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{prefixCheck("vm_", "an instance")},

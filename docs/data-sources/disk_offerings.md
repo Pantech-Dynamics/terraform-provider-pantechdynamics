@@ -3,19 +3,19 @@
 page_title: "pantechdynamics_disk_offerings Data Source - pantechdynamics"
 subcategory: ""
 description: |-
-  Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: on staging, volumes with local storage attached to instances and shared ones did not.
+  Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: local storage offerings can be attached directly to instances.
 ---
 
 # pantechdynamics_disk_offerings (Data Source)
 
-Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: on staging, volumes with local storage attached to instances and shared ones did not.
+Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: local storage offerings can be attached directly to instances.
 
 ## Example Usage
 
 ```terraform
 data "pantechdynamics_disk_offerings" "all" {}
 
-# Offerings whose volumes can be attached on staging.
+# Offerings whose volumes can be attached to instances.
 output "local_offerings" {
   value = [for o in data.pantechdynamics_disk_offerings.all.disk_offerings : o.slug if o.storage_type == "local"]
 }

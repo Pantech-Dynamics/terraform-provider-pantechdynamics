@@ -85,7 +85,7 @@ type attachVolumeRequest struct {
 
 // CreateVolume starts creating a volume. The returned operation's ResourceID is
 // the volume id. It is retried on gateway errors because the backend replays a
-// create on the same Idempotency-Key, verified on staging.
+// create on the same Idempotency-Key.
 func (c *Client) CreateVolume(ctx context.Context, req CreateVolumeRequest) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, "/volumes", req, &ref, replaySafe()); err != nil {
@@ -127,7 +127,7 @@ func (c *Client) ResizeVolume(ctx context.Context, id, diskOfferingSlug string, 
 
 // AttachVolume starts attaching a volume to a running instance in the same zone.
 // It is retried on gateway errors because the backend replays an attach on the
-// same Idempotency-Key, verified on staging.
+// same Idempotency-Key.
 func (c *Client) AttachVolume(ctx context.Context, id, instanceID string) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, volumePath(id)+"/attach", attachVolumeRequest{InstanceID: instanceID}, &ref, replaySafe()); err != nil {
@@ -139,7 +139,7 @@ func (c *Client) AttachVolume(ctx context.Context, id, instanceID string) (*Oper
 // DetachVolume starts detaching a volume. Only call it for an attached volume:
 // detaching one that is not attached fails the operation after about a minute.
 // It is retried on gateway errors because the backend replays a detach on the
-// same Idempotency-Key, verified on staging.
+// same Idempotency-Key.
 func (c *Client) DetachVolume(ctx context.Context, id string) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, volumePath(id)+"/detach", nil, &ref, replaySafe()); err != nil {

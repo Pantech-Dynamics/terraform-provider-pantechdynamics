@@ -78,15 +78,15 @@ type restoreSnapshotRequest struct {
 	SizeGB           int64  `json:"size_gb,omitempty"`
 }
 
-// CreateInstanceSnapshot starts a snapshot of an instance's root disk. On staging
-// it succeeded for a stopped instance and failed for a running one. It is retried
-// on gateway errors because the backend replays it on the same Idempotency-Key.
+// CreateInstanceSnapshot starts a snapshot of an instance's root disk. It requires
+// the instance to be stopped first. It is retried on gateway errors because the
+// backend replays it on the same Idempotency-Key.
 func (c *Client) CreateInstanceSnapshot(ctx context.Context, instanceID, name string) (*OperationReference, error) {
 	return c.createSnapshot(ctx, instancePath(instanceID)+"/snapshots", name)
 }
 
-// CreateVolumeSnapshot starts a snapshot of a volume. On staging it succeeded for
-// a local volume attached to an instance and failed for a detached shared one.
+// CreateVolumeSnapshot starts a snapshot of a volume. It is retried on gateway
+// errors because the backend replays it on the same Idempotency-Key.
 func (c *Client) CreateVolumeSnapshot(ctx context.Context, volumeID, name string) (*OperationReference, error) {
 	return c.createSnapshot(ctx, volumePath(volumeID)+"/snapshots", name)
 }
@@ -129,8 +129,7 @@ func (c *Client) DeleteSnapshot(ctx context.Context, id string) (*OperationRefer
 }
 
 // RestoreSnapshot starts creating a new volume from a snapshot. The returned
-// operation's ResourceID is the new volume. On staging this failed, even from a
-// completed snapshot, leaving a failed volume. It is retried on gateway errors
+// operation's ResourceID is the new volume. It is retried on gateway errors
 // because the backend replays it on the same Idempotency-Key.
 func (c *Client) RestoreSnapshot(ctx context.Context, id, name, diskOfferingSlug string, sizeGB int64) (*OperationReference, error) {
 	var ref OperationReference

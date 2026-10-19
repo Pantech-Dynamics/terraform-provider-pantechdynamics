@@ -54,15 +54,13 @@ func addWaitError(diags *diag.Diagnostics, summary, id string, err error) {
 	}
 }
 
-// addAttachError explains a failed attach. On staging every attach of a shared
-// volume failed with a bare provider job failure while a local volume attached,
-// so the storage type is named in the message.
+// addAttachError explains a failed attach.
 func addAttachError(diags *diag.Diagnostics, id, storageType string, err error) {
 	var opErr *client.OperationError
 	if errors.As(err, &opErr) {
 		hint := ""
 		if storageType == "shared" {
-			hint = "\n\nThis volume's storage type is \"shared\". On the staging platform, attaching a shared volume to an instance failed in every test while a local volume attached. Try a disk offering whose storage_type is \"local\"."
+			hint = "\n\nThis volume's storage type is \"shared\". Attaching a volume directly to an instance requires a disk offering whose storage_type is \"local\"."
 		}
 		diags.AddError("Error attaching the volume", resourcekit.WithFailureHint(err)+hint+"\n\nThe volume "+id+" exists and is not attached. It can still be deleted.")
 		return

@@ -1,6 +1,6 @@
 data "pantechdynamics_disk_offerings" "all" {}
 
-# Offerings whose volumes can be attached on staging.
+# Offerings whose volumes can be attached to instances.
 output "local_offerings" {
   value = [for o in data.pantechdynamics_disk_offerings.all.disk_offerings : o.slug if o.storage_type == "local"]
 }

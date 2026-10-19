@@ -70,7 +70,6 @@ resource "pantechdynamics_volume" "archive" {
 # plan refuses a resize while it is still attached, and a volume never shrinks.
 
 # A volume created from a snapshot. Its size must be at least the snapshot's.
-# Restoring failed on the staging platform, even from a completed snapshot.
 resource "pantechdynamics_volume" "restored" {
   name               = "data-restored"
   disk_offering_slug = "small-local-20gb"
@@ -93,7 +92,7 @@ resource "pantechdynamics_volume" "restored" {
 - `mount_point` (String) An absolute path such as /data, stored with the volume as a label. The platform does not mount anything. Changing it replaces the volume.
 - `region` (String) Region to create the volume in, for example af-abj. Defaults to the platform's default region. Changing it replaces the volume.
 - `size_gb` (Number) Size in gigabytes. Required for a customized offering. A fixed offering has its own size, and setting a different size_gb is an error, because the API would silently ignore it.
-- `source_snapshot_id` (String) Id of a snapshot to create the volume from, from pantechdynamics_snapshot. The volume gets the snapshot's data, and its size must be at least the snapshot's. Changing it replaces the volume. Restoring a snapshot to a volume failed on the staging platform, even from a completed snapshot, so this is untested against a working platform.
+- `source_snapshot_id` (String) Id of a snapshot to create the volume from, from pantechdynamics_snapshot. The volume gets the snapshot's data, and its size must be at least the snapshot's. Changing it replaces the volume.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only

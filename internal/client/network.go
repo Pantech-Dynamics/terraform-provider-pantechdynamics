@@ -32,7 +32,7 @@ type CreateNetworkRequest struct {
 }
 
 // CreateNetwork starts creating a network. It is retried on gateway errors
-// because the backend replays it on an Idempotency-Key (verified on staging).
+// because the backend replays it on an Idempotency-Key.
 func (c *Client) CreateNetwork(ctx context.Context, req CreateNetworkRequest) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, "/networks", req, &ref, replaySafe()); err != nil {

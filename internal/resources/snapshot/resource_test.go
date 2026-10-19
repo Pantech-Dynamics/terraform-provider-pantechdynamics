@@ -279,10 +279,10 @@ func TestCreate(t *testing.T) {
 		resp := create(api, instanceSource)
 
 		text := errorText(resp.Diagnostics)
-		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, "stopped instance") || !strings.Contains(text, "deletes it and tries again") || !strings.Contains(text, "SNAPSHOT_NAME_TAKEN") {
+		if !strings.Contains(text, "PROVISIONING_FAILED") || !strings.Contains(text, "Stop the instance") || !strings.Contains(text, "deletes it and tries again") || !strings.Contains(text, "SNAPSHOT_NAME_TAKEN") {
 			t.Fatalf("diags = %s", text)
 		}
-		if n := strings.Count(text, "On the staging platform"); n != 1 {
+		if n := strings.Count(text, "requires the instance to be stopped"); n != 1 {
 			t.Fatalf("the hint appears %d times, want once: %s", n, text)
 		}
 		m := getModel(t, resp.State)
@@ -297,7 +297,7 @@ func TestCreate(t *testing.T) {
 
 		_, err := newTestResource(seeded(failed)).isActive("snap_1")(ctx)
 
-		if err == nil || !strings.Contains(err.Error(), "ended in the failed state") || strings.Contains(err.Error(), "On the staging platform") {
+		if err == nil || !strings.Contains(err.Error(), "ended in the failed state") || strings.Contains(err.Error(), "requires the instance to be stopped") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -305,7 +305,7 @@ func TestCreate(t *testing.T) {
 	t.Run("a failed volume snapshot gives the volume hint", func(t *testing.T) {
 		api := seeded()
 		api.failNext = true
-		if text := errorText(create(api, volumeSource).Diagnostics); !strings.Contains(text, "attached to an instance succeeded") {
+		if text := errorText(create(api, volumeSource).Diagnostics); !strings.Contains(text, "attached local volume") {
 			t.Fatalf("diags = %s", text)
 		}
 	})

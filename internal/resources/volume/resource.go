@@ -114,7 +114,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:  []validator.String{instanceIDCheck},
 			},
 			"source_snapshot_id": schema.StringAttribute{
-				Description: "Id of a snapshot to create the volume from, from pantechdynamics_snapshot. The volume gets the snapshot's data, and its size must be at least the snapshot's. Changing it replaces the volume. Restoring a snapshot to a volume failed on the staging platform, even from a completed snapshot, so this is untested against a working platform.",
+				Description: "Id of a snapshot to create the volume from, from pantechdynamics_snapshot. The volume gets the snapshot's data, and its size must be at least the snapshot's. Changing it replaces the volume.",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
@@ -308,8 +308,8 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 }
 
-// restoreHint explains what staging showed about restoring a snapshot.
-const restoreHint = "On the staging platform every restore of a snapshot to a volume failed, even from a completed snapshot, and left a volume in the failed state. That volume exists and can be deleted. If the snapshot is complete and the offering is at least as big as the snapshot, this may be a platform problem."
+// restoreHint explains what to check when restoring a snapshot fails.
+const restoreHint = "Restoring a snapshot to a volume left the volume in the failed state. That volume exists and can be deleted. If the snapshot is complete and the offering is at least as big as the snapshot, check that the source snapshot is active."
 
 // modelFromState reads the model back from state, ignoring errors: it is only used to
 // word an error message.

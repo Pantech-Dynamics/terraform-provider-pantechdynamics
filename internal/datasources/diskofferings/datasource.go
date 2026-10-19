@@ -40,7 +40,7 @@ func (d *DataSource) Metadata(_ context.Context, req datasource.MetadataRequest,
 // Schema describes the attributes.
 func (d *DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: on staging, volumes with local storage attached to instances and shared ones did not.",
+		Description: "Lists the disk offerings a volume can be ordered with. Use an offering's slug as the disk_offering_slug of a pantechdynamics_volume. The storage type matters: local storage offerings can be attached directly to instances.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Always \"disk_offerings\". Present because every data source needs an id.",

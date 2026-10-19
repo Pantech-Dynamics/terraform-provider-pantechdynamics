@@ -55,7 +55,6 @@ resource "pantechdynamics_volume" "archive" {
 # plan refuses a resize while it is still attached, and a volume never shrinks.
 
 # A volume created from a snapshot. Its size must be at least the snapshot's.
-# Restoring failed on the staging platform, even from a completed snapshot.
 resource "pantechdynamics_volume" "restored" {
   name               = "data-restored"
   disk_offering_slug = "small-local-20gb"

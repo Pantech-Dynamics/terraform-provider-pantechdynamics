@@ -389,7 +389,7 @@ func TestCreateFromASnapshot(t *testing.T) {
 		}
 		warned := false
 		for _, d := range resp.Diagnostics.Warnings() {
-			warned = warned || strings.Contains(d.Detail(), "staging platform every restore")
+			warned = warned || strings.Contains(d.Detail(), "Restoring a snapshot to a volume left the volume in the failed state")
 		}
 		m := getModel(t, resp.State)
 		if !warned || m.ID.ValueString() != "vol_1" || m.ObservedState.ValueString() != "failed" || m.SourceSnapshotID.ValueString() != "snap_9" {
