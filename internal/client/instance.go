@@ -195,7 +195,7 @@ func (c *Client) DeleteInstance(ctx context.Context, id string) (*OperationRefer
 // Only call it when the instance is stopped: starting a running instance makes
 // the operation fail and leaves the instance in the failed state. It is retried
 // on gateway errors because the backend replays a start on the same
-// Idempotency-Key, verified on staging.
+// Idempotency-Key.
 func (c *Client) StartInstance(ctx context.Context, id string) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/start", nil, &ref, replaySafe()); err != nil {
@@ -218,10 +218,11 @@ func (c *Client) StopInstance(ctx context.Context, id string) (*OperationReferen
 }
 
 // ResizeInstance moves a running instance to a bigger plan and returns the
-// operation to follow. The platform stops, resizes and restarts it, which took
-// about 4.5 minutes on staging, and the disk grows with the plan. A plan that is
-// not bigger is refused with the field error PLAN_NOT_BIGGER, and a stopped
-// instance with 409. It is retried on gateway errors because the public API replays every write on the same Idempotency-Key except ssh-key create and delete and the console.
+// operation to follow. The platform stops, resizes and restarts it, and the disk
+// grows with the plan. A plan that is not bigger is refused with the field error
+// PLAN_NOT_BIGGER, and a stopped instance with 409. It is retried on gateway
+// errors because the public API replays every write on the same Idempotency-Key
+// except ssh-key create and delete and the console.
 func (c *Client) ResizeInstance(ctx context.Context, id, planSlug string) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/resize", resizeRequest{PlanSlug: planSlug}, &ref, replaySafe()); err != nil {
@@ -234,7 +235,7 @@ func (c *Client) ResizeInstance(ctx context.Context, id, planSlug string) (*Oper
 // and returns the operation to follow. A running instance is refused with
 // CodeInstanceMustBeStopped, and the new group applies when it starts again. It
 // is retried on gateway errors because the backend replays it on the same
-// Idempotency-Key, verified on staging.
+// Idempotency-Key.
 func (c *Client) ChangeInstanceSecurityGroup(ctx context.Context, id, securityGroupID string) (*OperationReference, error) {
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPut, instancePath(id)+"/security-group", securityGroupRequest{SecurityGroupID: securityGroupID}, &ref, replaySafe()); err != nil {

@@ -43,7 +43,7 @@ func allSettable(fields []client.FieldError) bool {
 func addCreateError(diags *diag.Diagnostics, err error) {
 	if client.HasCode(err, client.CodeSnapshotNameTaken) {
 		diags.AddError("Snapshot name already in use",
-			err.Error()+"\n\nThis instance or volume already has, or had, a snapshot with this name. On the staging platform a snapshot that failed and a snapshot that was deleted both keep their name. Choose a new name, or bring a live snapshot under Terraform with `terraform import`.")
+			err.Error()+"\n\nThis instance or volume already has, or had, a snapshot with this name. Snapshots that failed or were deleted keep their name reserved. Choose a new name, or bring a live snapshot under Terraform with `terraform import`.")
 		return
 	}
 	addAPIError(diags, "Error creating snapshot", err)
@@ -55,7 +55,7 @@ func addWaitError(diags *diag.Diagnostics, summary, id, hint string, err error) 
 	var opErr *client.OperationError
 	switch {
 	case errors.As(err, &opErr):
-		diags.AddError(summary, resourcekit.WithFailureHint(err)+hint+"\n\nThe failed snapshot "+id+" still exists and holds its name. The next apply deletes it and tries again, but a deleted snapshot's name stays reserved on staging, so that retry can be refused with SNAPSHOT_NAME_TAKEN. If it is, choose a new name.")
+		diags.AddError(summary, resourcekit.WithFailureHint(err)+hint+"\n\nThe failed snapshot "+id+" still exists and holds its name. The next apply deletes it and tries again, but a snapshot that failed keeps its name reserved, so that retry can be refused with SNAPSHOT_NAME_TAKEN. If it is, choose a new name.")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		diags.AddError(summary, "Stopped waiting for snapshot "+id+": "+err.Error()+
 			"\n\nThe snapshot may still complete. Run `terraform refresh` to see the current state before applying again.")
@@ -64,13 +64,13 @@ func addWaitError(diags *diag.Diagnostics, summary, id, hint string, err error) 
 	}
 }
 
-// failureHint names what staging showed about when a snapshot fails, by source.
+// failureHint names what to check when a snapshot fails, by source.
 func failureHint(m model) string {
 	switch {
 	case knownString(m.InstanceID) != "":
-		return "\n\nOn the staging platform a snapshot of a running instance's root disk failed, and a snapshot of a stopped instance succeeded. Stop the instance (desired_state = \"stopped\") and try again."
+		return "\n\nA snapshot of an instance's root disk requires the instance to be stopped. Stop the instance (desired_state = \"stopped\") and try again."
 	case knownString(m.VolumeID) != "":
-		return "\n\nOn the staging platform a snapshot of a local volume attached to an instance succeeded, and a snapshot of a detached shared volume failed."
+		return "\n\nTaking a volume snapshot requires the volume to be an attached local volume."
 	}
 	return ""
 }
