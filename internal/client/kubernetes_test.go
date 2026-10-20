@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const k8sJSON = `{"id":"k8s_1","name":"prod","zone_id":"af-abj-2","kubernetes_version_id":"k8sv_1","kubernetes_version":"1.31.2","network_id":"net_1","subnet_id":"snet_1","node_plan_id":"plan_1","node":{"vcpu":2,"memory_mb":4096,"disk_gb":40},"control_nodes":1,"workers":2,"nodes":3,"desired_state":"running","observed_state":"running","in_sync":true,"failure_code":null,"failure_reason":null,"available_upgrades":[{"id":"k8sv_2","zone_id":"af-abj-2","version":"1.32.0","status":"available","min_cpu":2,"min_memory_mb":2048}],"autoscaling":{"enabled":true,"min_workers":2,"max_workers":5},"api_allowed_cidrs":["203.0.113.0/24"],"endpoint":"https://k8s-1.example.test:6443","volume_storage_gb":30,"created_at":"2026-10-07T10:00:00Z","updated_at":"2026-10-07T10:00:00Z"}`
+const k8sJSON = `{"id":"k8s_1","name":"prod","zone_id":"af-abj-2","kubernetes_version_id":"k8sv_1","kubernetes_version":"1.31.2","network_id":"net_1","subnet_id":"snet_1","node_plan_id":"plan_1","node":{"vcpu":2,"memory_mb":4096,"disk_gb":40},"control_nodes":1,"workers":2,"nodes":3,"desired_state":"running","observed_state":"running","in_sync":true,"failure_code":null,"failure_reason":null,"available_upgrades":[{"id":"k8sv_2","zone_id":"af-abj-2","version":"1.32.0","status":"available","min_cpu":2,"min_memory_mb":2048}],"autoscaling":{"enabled":true,"min_workers":2,"max_workers":5},"api_allowed_cidrs":["203.0.113.0/24"],"endpoint":"https://k8s-1.example.test:6443","volume_storage_gb":30,"kind":"appliance","cni_plugin":"flannel","pod_cidr":"10.42.0.0/16","service_cidr":"10.43.0.0/16","endpoint_access":"public","created_at":"2026-10-07T10:00:00Z","updated_at":"2026-10-07T10:00:00Z"}`
 
 func TestKubernetesWritesUseTheRightRequest(t *testing.T) {
 	tests := []struct {
@@ -55,6 +55,22 @@ func TestKubernetesWritesUseTheRightRequest(t *testing.T) {
 			_, err := c.UpgradeKubernetesCluster(context.Background(), "k8s_1", UpgradeKubernetesClusterRequest{KubernetesVersionID: "k8sv_2"})
 			return err
 		}, http.MethodPost, "/v1/kubernetes-clusters/k8s_1/upgrade", `{"kubernetes_version_id":"k8sv_2"}`},
+		{"create with network settings", func(c *Client) error {
+			_, err := c.CreateKubernetesCluster(context.Background(), CreateKubernetesClusterRequest{Name: "prod", ZoneID: "af-abj-1", KubernetesVersionID: "k8sv_1", NodePlan: "s-2vcpu-4gb", Workers: 2, CNIPlugin: "calico", PodCIDR: "10.60.0.0/16", ServiceCIDR: "10.61.0.0/16"})
+			return err
+		}, http.MethodPost, "/v1/kubernetes-clusters", `{"name":"prod","zone_id":"af-abj-1","kubernetes_version_id":"k8sv_1","node_plan":"s-2vcpu-4gb","workers":2,"cni_plugin":"calico","pod_cidr":"10.60.0.0/16","service_cidr":"10.61.0.0/16"}`},
+		{"resize the node plan", func(c *Client) error {
+			_, err := c.ResizeKubernetesClusterPlan(context.Background(), "k8s_1", ResizeKubernetesClusterPlanRequest{NodePlan: "s-4vcpu-8gb"})
+			return err
+		}, http.MethodPost, "/v1/kubernetes-clusters/k8s_1/resize-plan", `{"node_plan":"s-4vcpu-8gb"}`},
+		{"change only the CNI", func(c *Client) error {
+			_, err := c.UpgradeKubernetesNetwork(context.Background(), "k8s_1", UpgradeKubernetesNetworkRequest{CNIPlugin: "calico"})
+			return err
+		}, http.MethodPost, "/v1/kubernetes-clusters/k8s_1/upgrade-network", `{"cni_plugin":"calico"}`},
+		{"endpoint access leaves the allow-list out when nil", func(c *Client) error {
+			_, err := c.ConfigureKubernetesEndpointAccess(context.Background(), "k8s_1", ConfigureKubernetesEndpointAccessRequest{EndpointAccess: "private"})
+			return err
+		}, http.MethodPost, "/v1/kubernetes-clusters/k8s_1/endpoint-access", `{"endpoint_access":"private"}`},
 		{"start", func(c *Client) error {
 			_, err := c.StartKubernetesCluster(context.Background(), "k8s_1")
 			return err

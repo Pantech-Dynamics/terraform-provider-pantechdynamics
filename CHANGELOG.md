@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-20)
 
 FEATURES:
+
+- `pantechdynamics_load_balancer`: new `kind`, `vpc_native` (a VPC zone, as before) or `appliance` (a standard zone: a managed load balancer VM with its own public address, billed as that VM), and `zone_id`. An appliance takes `zone_id` and no `public_ip_id` or `subnet_id`, which are now optional; the combination is checked at plan time. Left out, `kind` is inferred from `subnet_id` (vpc_native) or `zone_id` alone (appliance). Changing either replaces the load balancer. The data source reports both.
+- `pantechdynamics_kubernetes_cluster`: new `cni_plugin` (`flannel`, `wireguard` or `calico`), `pod_cidr` and `service_cidr`, set at create and changed in place by rebuilding the pod network; new `endpoint_access` (`public`, `private` or `dual`), set once the cluster runs and changed in place; new read-only `kind`. **`node_plan` now changes in place** (every node is moved to the new plan, one at a time) instead of replacing the cluster. The data source reports the new attributes.
+- **New resource:** `pantechdynamics_kubernetes_node_pool`, a group of workers with its own plan, size or autoscaling range, labels and taints. Size changes in place; import as `<cluster_id>/<pool_id>`. Create waits until every worker has joined; read-only `status` and `observed_workers` (what is billed). A pool the platform cannot build (`status = "unavailable"`) fails the create.
+- **New resource:** `pantechdynamics_kubernetes_addon`, which turns `metrics-server`, `csi-driver` (node-local volumes) or `ingress-controller` (ingress-nginx) on or off for a cluster; destroying it turns the add-on off. Import as `<cluster_id>/<name>`. Create and update wait until the cluster runs the add-on as asked (`status` `active` or `disabled`), failing on `unavailable`.
 
 - `pantechdynamics_volume`: new `encrypted` (optional bool, default false, changing it replaces the volume) creates an encrypted volume, and new read-only `encryption_status` (`none`, `requested` or `encrypted`) says where it is. A new encrypted volume is `requested`: the disk is encrypted when the Pantech agent formats it inside the instance, and the platform sets `encrypted` only after confirming it. `encrypted` cannot be combined with `source_snapshot_id`. A platform that does not support encrypted volumes yet fails the create with a clear error instead of leaving a plain volume that Terraform believes is encrypted.
 - `pantechdynamics_volume`: `storage_type` and the example now describe local volumes accurately: a local volume's disk is on one host and Pantech moves it to the instance's host on attach.

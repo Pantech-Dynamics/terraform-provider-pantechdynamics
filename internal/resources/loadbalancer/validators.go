@@ -6,10 +6,13 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 )
 
 // Limits the backend enforces.
@@ -105,4 +108,73 @@ func (privatePortDefault) PlanModifyInt64(ctx context.Context, req planmodifier.
 		return
 	}
 	resp.PlanValue = public // unknown stays unknown until public_port is known
+}
+
+// kindDefault plans an unset kind the way the backend infers it at create: a
+// subnet means vpc_native, a zone without one means appliance. It only acts on
+// a create; an existing load balancer keeps its kind through UseStateForUnknown.
+type kindDefault struct{}
+
+func (kindDefault) Description(context.Context) string {
+	return "vpc_native with subnet_id, appliance with only zone_id"
+}
+
+func (v kindDefault) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (kindDefault) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || !req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var subnet, zone types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subnet_id"), &subnet)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("zone_id"), &zone)...)
+	switch {
+	case subnet.IsUnknown() || zone.IsUnknown():
+		// left unknown until both are known
+	case !subnet.IsNull():
+		resp.PlanValue = types.StringValue(client.LoadBalancerVPCNative)
+	case !zone.IsNull():
+		resp.PlanValue = types.StringValue(client.LoadBalancerAppliance)
+	default:
+		resp.PlanValue = types.StringValue(client.LoadBalancerVPCNative)
+	}
+}
+
+// checkPlacement reports the attributes each kind needs or must not have, at
+// plan time, so a wrong combination fails before anything is created.
+func checkPlacement(kind, zone, publicIP, subnet types.String, diags *diag.Diagnostics) {
+	if kind.IsUnknown() || zone.IsUnknown() || publicIP.IsUnknown() || subnet.IsUnknown() {
+		return
+	}
+	k := kind.ValueString()
+	if kind.IsNull() {
+		k = client.LoadBalancerVPCNative
+		if subnet.IsNull() && publicIP.IsNull() && !zone.IsNull() {
+			k = client.LoadBalancerAppliance
+		}
+	}
+	switch k {
+	case client.LoadBalancerVPCNative:
+		if publicIP.IsNull() {
+			diags.AddAttributeError(path.Root("public_ip_id"), "Missing public_ip_id",
+				"A vpc_native load balancer needs public_ip_id, a load_balancer public IP of the subnet's network. In a standard zone, set zone_id (and kind = \"appliance\") instead.")
+		}
+		if subnet.IsNull() {
+			diags.AddAttributeError(path.Root("subnet_id"), "Missing subnet_id",
+				"A vpc_native load balancer needs subnet_id, the subnet its targets are in.")
+		}
+	case client.LoadBalancerAppliance:
+		if zone.IsNull() {
+			diags.AddAttributeError(path.Root("zone_id"), "Missing zone_id",
+				"An appliance load balancer needs zone_id, the standard zone it runs in.")
+		}
+		if !publicIP.IsNull() {
+			diags.AddAttributeError(path.Root("public_ip_id"), "Unexpected public_ip_id",
+				"An appliance load balancer has its own public address: remove public_ip_id.")
+		}
+		if !subnet.IsNull() {
+			diags.AddAttributeError(path.Root("subnet_id"), "Unexpected subnet_id",
+				"An appliance load balancer is not in a subnet: remove subnet_id.")
+		}
+	}
 }

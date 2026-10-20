@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -366,6 +367,93 @@ func TestSetValidators(t *testing.T) {
 			text := ErrorText(resp.Diagnostics)
 			if (tt.wantErr == "") != (text == "") || !strings.Contains(text, tt.wantErr) {
 				t.Errorf("errors = %q, want %q", text, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCreateApplianceSendsTheZoneOnly(t *testing.T) {
+	api := &fakeAPI{}
+	s := testSchema(t)
+	a := args("web", "roundrobin", strSet("vm_1"))
+	a["kind"], a["zone_id"], a["public_ip_id"], a["subnet_id"] = Str("appliance"), Str("af-abj-1"), UnknownStr(), UnknownStr()
+	resp := &resource.CreateResponse{State: EmptyState(s)}
+	(&Resource{api: api}).Create(Ctx, resource.CreateRequest{Plan: planFor(s, a)}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if r := api.lastCreate; r.Kind != "appliance" || r.ZoneID != "af-abj-1" || r.PublicIPID != "" || r.SubnetID != "" {
+		t.Errorf("request = %+v, want the zone and no public IP or subnet", r)
+	}
+	m := getModel(t, resp.State)
+	if m.Kind.ValueString() != "appliance" || m.ZoneID.ValueString() != "af-abj-1" || !m.NetworkID.IsNull() || m.PublicIPAddress.ValueString() == "" {
+		t.Errorf("model = %+v", m)
+	}
+}
+
+func TestCreateVPCNativeReportsItsZone(t *testing.T) {
+	api := &fakeAPI{}
+	resp := create(t, api, strSet())
+	m := getModel(t, resp.State)
+	if m.Kind.ValueString() != "vpc_native" || m.ZoneID.ValueString() != "af-abj-2" {
+		t.Errorf("kind %v zone %v", m.Kind, m.ZoneID)
+	}
+}
+
+func TestCheckPlacement(t *testing.T) {
+	null := types.StringNull()
+	s := types.StringValue
+	tests := []struct {
+		name                         string
+		kind, zone, publicIP, subnet types.String
+		wantErr                      string // "" means valid
+	}{
+		{"vpc_native inferred from the subnet", null, null, s("pip_1"), s("snet_1"), ""},
+		{"appliance inferred from the zone", null, s("af-abj-1"), null, null, ""},
+		{"explicit appliance", s("appliance"), s("af-abj-1"), null, null, ""},
+		{"vpc_native without a public IP", null, null, null, s("snet_1"), "Missing public_ip_id"},
+		{"nothing at all", null, null, null, null, "Missing public_ip_id"},
+		{"appliance without a zone", s("appliance"), null, null, null, "Missing zone_id"},
+		{"appliance with a subnet", s("appliance"), s("af-abj-1"), null, s("snet_1"), "Unexpected subnet_id"},
+		{"appliance with a public IP", s("appliance"), s("af-abj-1"), s("pip_1"), null, "Unexpected public_ip_id"},
+		{"unknown values wait", s("appliance"), types.StringUnknown(), null, null, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d diag.Diagnostics
+			checkPlacement(tt.kind, tt.zone, tt.publicIP, tt.subnet, &d)
+			switch {
+			case tt.wantErr == "" && d.HasError():
+				t.Errorf("unexpected error: %v", d)
+			case tt.wantErr != "" && !strings.Contains(ErrorText(d), tt.wantErr):
+				t.Errorf("errors = %q, want %q", ErrorText(d), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestKindDefaultFollowsThePlacement(t *testing.T) {
+	sch := testSchema(t)
+	tests := []struct {
+		name         string
+		subnet, zone tftypes.Value
+		want         types.String
+	}{
+		{"a subnet means vpc_native", Str("snet_1"), tftypes.NewValue(tftypes.String, nil), types.StringValue("vpc_native")},
+		{"only a zone means appliance", tftypes.NewValue(tftypes.String, nil), Str("af-abj-1"), types.StringValue("appliance")},
+		{"an unknown subnet waits", UnknownStr(), Str("af-abj-1"), types.StringUnknown()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tfsdk.Config{Schema: sch, Raw: Object(sch, map[string]tftypes.Value{"subnet_id": tt.subnet, "zone_id": tt.zone})}
+			req := planmodifier.StringRequest{
+				Path: path.Root("kind"), Config: cfg, Plan: Plan(sch, nil), State: EmptyState(sch),
+				ConfigValue: types.StringNull(), PlanValue: types.StringUnknown(),
+			}
+			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+			kindDefault{}.PlanModifyString(Ctx, req, resp)
+			if resp.Diagnostics.HasError() || !resp.PlanValue.Equal(tt.want) {
+				t.Errorf("plan = %v, want %v (%v)", resp.PlanValue, tt.want, resp.Diagnostics)
 			}
 		})
 	}

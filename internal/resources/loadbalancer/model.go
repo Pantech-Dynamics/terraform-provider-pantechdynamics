@@ -19,6 +19,8 @@ const memberRemoved = "deleted"
 type model struct {
 	ID              types.String   `tfsdk:"id"`
 	Name            types.String   `tfsdk:"name"`
+	Kind            types.String   `tfsdk:"kind"`
+	ZoneID          types.String   `tfsdk:"zone_id"`
 	PublicIPID      types.String   `tfsdk:"public_ip_id"`
 	SubnetID        types.String   `tfsdk:"subnet_id"`
 	Algorithm       types.String   `tfsdk:"algorithm"`
@@ -36,15 +38,19 @@ type model struct {
 }
 
 // toCreateRequest builds the create body. Empty lists are omitted, which the
-// backend reads as "any source" and "no targets yet".
+// backend reads as "any source" and "no targets yet". Unset kind, zone, public
+// IP and subnet are omitted too: an appliance has no public IP or subnet to
+// send, and a vpc_native load balancer takes its zone from the subnet.
 func toCreateRequest(ctx context.Context, plan model) (client.CreateLoadBalancerRequest, diag.Diagnostics) {
 	cidrs, diags := stringsOf(ctx, plan.CIDRList)
 	ids, d := stringsOf(ctx, plan.InstanceIDs)
 	diags.Append(d...)
 	return client.CreateLoadBalancerRequest{
 		Name:        plan.Name.ValueString(),
-		PublicIPID:  plan.PublicIPID.ValueString(),
-		SubnetID:    plan.SubnetID.ValueString(),
+		Kind:        knownString(plan.Kind),
+		ZoneID:      knownString(plan.ZoneID),
+		PublicIPID:  knownString(plan.PublicIPID),
+		SubnetID:    knownString(plan.SubnetID),
 		Algorithm:   plan.Algorithm.ValueString(),
 		PublicPort:  plan.PublicPort.ValueInt64(),
 		PrivatePort: resourcekit.IntPtr(plan.PrivatePort),
@@ -86,6 +92,8 @@ func fromAPIResponse(ctx context.Context, prev model, lb *client.LoadBalancer) (
 	return model{
 		ID:              types.StringValue(lb.ID),
 		Name:            types.StringValue(lb.Name),
+		Kind:            types.StringValue(kindOf(lb)),
+		ZoneID:          types.StringValue(lb.ZoneID),
 		PublicIPID:      types.StringValue(lb.PublicIPID),
 		SubnetID:        types.StringValue(lb.SubnetID),
 		Algorithm:       types.StringValue(lb.Algorithm),
@@ -117,7 +125,30 @@ func pendingModel(plan model, id string) model {
 	if m.PrivatePort.IsUnknown() {
 		m.PrivatePort = types.Int64Null()
 	}
+	for _, v := range []*types.String{&m.Kind, &m.ZoneID, &m.PublicIPID, &m.SubnetID} {
+		if v.IsUnknown() {
+			*v = types.StringNull()
+		}
+	}
 	return m
+}
+
+// kindOf is the load balancer's kind. One made before kinds existed reports
+// none and is vpc_native.
+func kindOf(lb *client.LoadBalancer) string {
+	if lb.Kind == "" {
+		return client.LoadBalancerVPCNative
+	}
+	return lb.Kind
+}
+
+// knownString is the value of a set string, and "" for a null or unknown one,
+// which the create body then omits.
+func knownString(v types.String) string {
+	if v.IsNull() || v.IsUnknown() {
+		return ""
+	}
+	return v.ValueString()
 }
 
 // targetIDs lists the instances that are, or are becoming, targets, sorted.

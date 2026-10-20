@@ -11,8 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -68,14 +66,6 @@ func (controlNodesValidator) ValidateInt64(_ context.Context, req validator.Int6
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid control_nodes",
 			fmt.Sprintf("control_nodes must be 1, or 3 where the zone offers a highly available control plane, got %d.", n))
 	}
-}
-
-// replaceUnlessImported replaces the cluster when node_plan differs from the
-// state, but not when the state holds none. The API reports node_plan_id, not
-// the slug, so an imported cluster has none in state, and replacing it for
-// that would destroy the cluster to fix a gap in our own state.
-func replaceUnlessImported(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-	resp.RequiresReplace = !req.StateValue.IsNull() && !req.ConfigValue.Equal(req.StateValue)
 }
 
 // checkUpgrade stops at plan time a kubernetes_version_id change the platform
@@ -225,4 +215,21 @@ func planWorkers(ctx context.Context, req resource.ModifyPlanRequest, resp *reso
 	if auto.IsUnknown() || autoscalingEnabled(ctx, auto) {
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("workers"), types.Int64Unknown())...)
 	}
+}
+
+// planNodeResize marks the node size and plan id as changing when node_plan
+// changes in place, since they hold the old plan's values until the resize
+// is done.
+func planNodeResize(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var state, plan types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("node_plan"), &state)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("node_plan"), &plan)...)
+	if _, ok := nodePlanChange(state, plan); !ok {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("node"), types.ObjectUnknown(nodeAttrTypes))...)
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("node_plan_id"), types.StringUnknown())...)
 }

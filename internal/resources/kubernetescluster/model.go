@@ -35,6 +35,11 @@ type model struct {
 	APIAllowedCIDRs     types.Set      `tfsdk:"api_allowed_cidrs"`
 	Endpoint            types.String   `tfsdk:"endpoint"`
 	VolumeStorageGB     types.Int64    `tfsdk:"volume_storage_gb"`
+	Kind                types.String   `tfsdk:"kind"`
+	CNIPlugin           types.String   `tfsdk:"cni_plugin"`
+	PodCIDR             types.String   `tfsdk:"pod_cidr"`
+	ServiceCIDR         types.String   `tfsdk:"service_cidr"`
+	EndpointAccess      types.String   `tfsdk:"endpoint_access"`
 	KubeConfig          types.String   `tfsdk:"kube_config"`
 	CreatedAt           types.String   `tfsdk:"created_at"`
 	UpdatedAt           types.String   `tfsdk:"updated_at"`
@@ -66,7 +71,8 @@ type autoscalingModel struct {
 // toCreateRequest builds the create body. An unset subnet_id is omitted, as a
 // standard zone requires. With autoscaling enabled, workers is unknown at
 // create (the autoscaler owns it), so it is left out and the cluster starts at
-// min_workers. An empty api_allowed_cidrs is left out: any address.
+// min_workers. An empty api_allowed_cidrs is left out: any address. Unset
+// network settings are left out, so the backend applies its defaults.
 func toCreateRequest(ctx context.Context, plan model) (client.CreateKubernetesClusterRequest, diag.Diagnostics) {
 	cidrs, diags := stringsOf(ctx, plan.APIAllowedCIDRs)
 	if len(cidrs) == 0 {
@@ -83,6 +89,9 @@ func toCreateRequest(ctx context.Context, plan model) (client.CreateKubernetesCl
 		ControlNodes:        plan.ControlNodes.ValueInt64(),
 		Workers:             plan.Workers.ValueInt64(), // 0, so omitted, when unknown
 		APIAllowedCIDRs:     cidrs,
+		CNIPlugin:           knownString(plan.CNIPlugin),
+		PodCIDR:             knownString(plan.PodCIDR),
+		ServiceCIDR:         knownString(plan.ServiceCIDR),
 	}
 	if auto.Enabled {
 		req.Autoscaling = &auto
@@ -117,6 +126,50 @@ func toUpdateRequest(ctx context.Context, state, plan model) (req client.UpdateK
 		req.APIAllowedCIDRs, changed = &cidrs, true
 	}
 	return req, changed, diags
+}
+
+// toNetworkRequest builds the upgrade-network body from the network settings
+// the configuration changes. changed is false when none does.
+func toNetworkRequest(state, plan model) (req client.UpgradeKubernetesNetworkRequest, changed bool) {
+	pick := func(p, s types.String) string {
+		if p.IsNull() || p.IsUnknown() || p.Equal(s) {
+			return ""
+		}
+		return p.ValueString()
+	}
+	req = client.UpgradeKubernetesNetworkRequest{
+		CNIPlugin:   pick(plan.CNIPlugin, state.CNIPlugin),
+		PodCIDR:     pick(plan.PodCIDR, state.PodCIDR),
+		ServiceCIDR: pick(plan.ServiceCIDR, state.ServiceCIDR),
+	}
+	return req, req != client.UpgradeKubernetesNetworkRequest{}
+}
+
+// endpointAccessChange is the endpoint access to apply: the configured mode
+// when it differs from current. A null or unknown plan changes nothing.
+func endpointAccessChange(current, plan types.String) (string, bool) {
+	if plan.IsNull() || plan.IsUnknown() || plan.Equal(current) {
+		return "", false
+	}
+	return plan.ValueString(), true
+}
+
+// nodePlanChange is the plan slug to move every node to. A state that holds
+// no slug (after an import) is not a change: the API cannot report the slug,
+// so the configuration's value is simply stored.
+func nodePlanChange(state, plan types.String) (string, bool) {
+	if state.IsNull() || state.ValueString() == "" || plan.IsNull() || plan.IsUnknown() || plan.Equal(state) {
+		return "", false
+	}
+	return plan.ValueString(), true
+}
+
+// knownString is the value of a set string, and "" for a null or unknown one.
+func knownString(v types.String) string {
+	if v.IsNull() || v.IsUnknown() {
+		return ""
+	}
+	return v.ValueString()
 }
 
 // autoscalingOf reads the autoscaling object as the API shape. Null (or
@@ -217,6 +270,11 @@ func fromAPIResponse(ctx context.Context, prev model, k *client.KubernetesCluste
 		APIAllowedCIDRs:     cidrSet,
 		Endpoint:            resourcekit.OptionalString(k.Endpoint),
 		VolumeStorageGB:     types.Int64Value(k.VolumeStorageGB),
+		Kind:                types.StringValue(k.Kind),
+		CNIPlugin:           types.StringValue(k.CNIPlugin),
+		PodCIDR:             types.StringValue(k.PodCIDR),
+		ServiceCIDR:         types.StringValue(k.ServiceCIDR),
+		EndpointAccess:      types.StringValue(k.EndpointAccess),
 		KubeConfig:          nullIfUnknown(prev.KubeConfig),
 		CreatedAt:           resourcekit.Timestamp(k.CreatedAt),
 		UpdatedAt:           resourcekit.Timestamp(k.UpdatedAt),
@@ -245,6 +303,10 @@ func pendingModel(plan model, id string) model {
 	m.KubeConfig = types.StringNull()
 	m.CreatedAt = types.StringNull()
 	m.UpdatedAt = types.StringNull()
+	m.Kind = types.StringNull()
+	for _, v := range []*types.String{&m.CNIPlugin, &m.PodCIDR, &m.ServiceCIDR, &m.EndpointAccess} {
+		*v = nullIfUnknown(*v)
+	}
 	return m
 }
 

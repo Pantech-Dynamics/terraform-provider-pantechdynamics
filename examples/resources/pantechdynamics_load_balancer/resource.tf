@@ -1,4 +1,6 @@
-# Spreads HTTP on one public address across two instances in a VPC subnet.
+# Spreads HTTP on one public address across two instances in a VPC subnet
+# (kind = "vpc_native"). An appliance load balancer for a standard zone follows
+# at the end.
 
 resource "pantechdynamics_network" "main" {
   name = "main"
@@ -55,4 +57,28 @@ resource "pantechdynamics_load_balancer" "web" {
 
 output "web_url" {
   value = "http://${pantechdynamics_load_balancer.web.public_ip_address}"
+}
+
+# In a standard zone there is no VPC router: an appliance load balancer is a
+# managed load balancer VM with its own public address, billed as that VM. It
+# takes zone_id and no public IP or subnet. The targets' security groups must
+# allow private_port.
+resource "pantechdynamics_instance" "app" {
+  count      = 2
+  name       = "app-${count.index + 1}"
+  plan_slug  = "individual"
+  image_slug = "ubuntu-24-04"
+  region     = "af-abj"
+}
+
+resource "pantechdynamics_load_balancer" "app" {
+  name         = "app"
+  kind         = "appliance" # inferred from zone_id when left out
+  zone_id      = "af-abj-1"
+  public_port  = 80
+  instance_ids = pantechdynamics_instance.app[*].id
+}
+
+output "app_url" {
+  value = "http://${pantechdynamics_load_balancer.app.public_ip_address}"
 }

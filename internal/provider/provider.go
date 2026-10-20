@@ -19,7 +19,9 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetesaddon"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetescluster"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetesnodepool"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/loadbalancer"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/network"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/portforward"
@@ -188,6 +190,8 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		firewallrule.New,
 		instance.New,
 		kubernetescluster.New,
+		kubernetesnodepool.New,
+		kubernetesaddon.New,
 		loadbalancer.New,
 		network.New,
 		portforward.New,

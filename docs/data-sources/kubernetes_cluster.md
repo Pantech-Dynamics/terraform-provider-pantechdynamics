@@ -46,10 +46,13 @@ output "prod_cluster" {
 - `api_allowed_cidrs` (List of String) IPv4 CIDRs allowed to reach the API server, sorted. Empty means any address.
 - `autoscaling` (Attributes) The cluster autoscaler. When enabled it moves workers between min_workers and max_workers; when not, both bounds are 0. (see [below for nested schema](#nestedatt--autoscaling))
 - `available_upgrade_ids` (List of String) Ids of the Kubernetes versions the cluster can be upgraded to now.
+- `cni_plugin` (String) The pod network plugin: "flannel", "wireguard" or "calico".
 - `control_nodes` (Number) Control plane nodes: 1, or 3 for a highly available control plane.
 - `created_at` (String) When the cluster was created, in RFC 3339 UTC, to the second.
 - `endpoint` (String) The API server's URL. Null until the cluster has one.
+- `endpoint_access` (String) Where the API server can be reached from: "public", "private" or "dual".
 - `in_sync` (Boolean) False while a scale or upgrade has not finished.
+- `kind` (String) How the platform runs the cluster, for example "appliance".
 - `kubernetes_version` (String) The Kubernetes version the cluster runs, for example "1.31.2".
 - `kubernetes_version_id` (String) Id of the Kubernetes version the cluster runs.
 - `network_id` (String) Id of the VPC network the nodes are in. Null in a standard zone.
@@ -57,6 +60,8 @@ output "prod_cluster" {
 - `node_plan_id` (String) Id of the plan every node uses.
 - `nodes` (Number) control_nodes plus workers: the number of VMs billed.
 - `observed_state` (String) State of the cluster as the platform sees it, for example "running".
+- `pod_cidr` (String) The pods' address range.
+- `service_cidr` (String) The services' address range.
 - `subnet_id` (String) Id of the subnet the nodes are in. Null in a standard zone.
 - `volume_storage_gb` (Number) Storage, in GB, that the workloads' persistent volume claims use, billed with the nodes' disks.
 - `workers` (Number) Worker nodes.

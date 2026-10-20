@@ -35,11 +35,26 @@ type LoadBalancerMember struct {
 	ObservedState string  `json:"observed_state"`
 }
 
-// LoadBalancer spreads one TCP port of a load_balancer public IP across
-// instances in one subnet of a VPC network.
+// Load balancer kinds.
+const (
+	// LoadBalancerVPCNative is a rule on a VPC network's router: one TCP port
+	// of a load_balancer public IP spread across instances in one subnet.
+	LoadBalancerVPCNative = "vpc_native"
+
+	// LoadBalancerAppliance is a platform-managed load balancer VM with its own
+	// public address, in a standard zone, billed as that VM.
+	LoadBalancerAppliance = "appliance"
+)
+
+// LoadBalancer spreads one TCP port across instances: either a load_balancer
+// public IP of a VPC network (vpc_native) or a load balancer VM in a standard
+// zone (appliance). Kind is empty on a load balancer made before kinds
+// existed, which is vpc_native.
 type LoadBalancer struct {
 	ID              string               `json:"id"`
 	Name            string               `json:"name"`
+	ZoneID          string               `json:"zone_id"`
+	Kind            string               `json:"kind"`
 	PublicIPID      string               `json:"public_ip_id"`
 	PublicIPAddress *string              `json:"public_ip_address"`
 	NetworkID       *string              `json:"network_id"`
@@ -59,11 +74,15 @@ type LoadBalancer struct {
 
 // CreateLoadBalancerRequest creates a load balancer. Unset optional fields are
 // omitted, so the backend applies its defaults (roundrobin, private_port equal
-// to public_port, any source, no targets).
+// to public_port, any source, no targets). A vpc_native load balancer needs
+// PublicIPID and SubnetID; an appliance needs ZoneID. An empty Kind lets the
+// backend infer it: vpc_native with a subnet, appliance with only a zone.
 type CreateLoadBalancerRequest struct {
 	Name        string   `json:"name"`
-	PublicIPID  string   `json:"public_ip_id"`
-	SubnetID    string   `json:"subnet_id"`
+	Kind        string   `json:"kind,omitempty"`
+	ZoneID      string   `json:"zone_id,omitempty"`
+	PublicIPID  string   `json:"public_ip_id,omitempty"`
+	SubnetID    string   `json:"subnet_id,omitempty"`
 	Algorithm   string   `json:"algorithm,omitempty"`
 	PublicPort  int64    `json:"public_port"`
 	PrivatePort *int64   `json:"private_port,omitempty"`

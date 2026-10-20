@@ -30,6 +30,11 @@ type fakeAPI struct {
 	lastCreate  client.CreateKubernetesClusterRequest
 	lastUpdate  client.UpdateKubernetesClusterRequest
 	lastUpgrade client.UpgradeKubernetesClusterRequest
+
+	calls        []string // the change endpoints called, in order
+	lastResize   client.ResizeKubernetesClusterPlanRequest
+	lastNetwork  client.UpgradeKubernetesNetworkRequest
+	lastEndpoint client.ConfigureKubernetesEndpointAccessRequest
 }
 
 const testKubeconfig = "apiVersion: v1\nkind: Config\n"
@@ -52,6 +57,7 @@ func cluster(id string, workers int64) client.KubernetesCluster {
 		DesiredState: "running", ObservedState: "running", InSync: true,
 		AvailableUpgrades: []client.KubernetesVersion{{ID: "k8sv_2", ZoneID: "af-abj-2", Version: "1.32.0", Status: "available"}},
 		APIAllowedCIDRs:   []string{}, Endpoint: ptr("https://" + id + ".example.test:6443"), VolumeStorageGB: 30,
+		Kind: "appliance", CNIPlugin: "flannel", PodCIDR: "10.42.0.0/16", ServiceCIDR: "10.43.0.0/16", EndpointAccess: "public",
 		CreatedAt: now(), UpdatedAt: now(),
 	}
 }
@@ -87,6 +93,11 @@ func (f *fakeAPI) CreateKubernetesCluster(_ context.Context, req client.CreateKu
 	}
 	if req.APIAllowedCIDRs != nil {
 		k.APIAllowedCIDRs = slices.Sorted(slices.Values(req.APIAllowedCIDRs))
+	}
+	for dst, v := range map[*string]string{&k.CNIPlugin: req.CNIPlugin, &k.PodCIDR: req.PodCIDR, &k.ServiceCIDR: req.ServiceCIDR} {
+		if v != "" {
+			*dst = v
+		}
 	}
 	if f.createState != "" {
 		k.ObservedState = f.createState
@@ -155,6 +166,37 @@ func (f *fakeAPI) UpgradeKubernetesCluster(_ context.Context, id string, req cli
 		k.InSync = !f.outOfSync
 	}
 	return &client.OperationReference{OperationID: "op_upgrade", ResourceID: id}, nil
+}
+
+func (f *fakeAPI) ResizeKubernetesClusterPlan(_ context.Context, id string, req client.ResizeKubernetesClusterPlanRequest) (*client.OperationReference, error) {
+	f.calls = append(f.calls, "resize")
+	f.lastResize = req
+	if k := f.find(id); k != nil {
+		k.NodePlanID, k.Node = "plan_2", client.KubernetesNode{VCPU: 4, MemoryMB: 8192, DiskGB: 80}
+	}
+	return &client.OperationReference{OperationID: "op_resize", ResourceID: id}, nil
+}
+
+func (f *fakeAPI) UpgradeKubernetesNetwork(_ context.Context, id string, req client.UpgradeKubernetesNetworkRequest) (*client.OperationReference, error) {
+	f.calls = append(f.calls, "network")
+	f.lastNetwork = req
+	if k := f.find(id); k != nil {
+		for dst, v := range map[*string]string{&k.CNIPlugin: req.CNIPlugin, &k.PodCIDR: req.PodCIDR, &k.ServiceCIDR: req.ServiceCIDR} {
+			if v != "" {
+				*dst = v
+			}
+		}
+	}
+	return &client.OperationReference{OperationID: "op_network", ResourceID: id}, nil
+}
+
+func (f *fakeAPI) ConfigureKubernetesEndpointAccess(_ context.Context, id string, req client.ConfigureKubernetesEndpointAccessRequest) (*client.OperationReference, error) {
+	f.calls = append(f.calls, "endpoint")
+	f.lastEndpoint = req
+	if k := f.find(id); k != nil {
+		k.EndpointAccess = req.EndpointAccess
+	}
+	return &client.OperationReference{OperationID: "op_endpoint", ResourceID: id}, nil
 }
 
 func (f *fakeAPI) DeleteKubernetesCluster(_ context.Context, id string) (*client.OperationReference, error) {

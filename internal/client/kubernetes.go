@@ -137,6 +137,11 @@ type KubernetesCluster struct {
 	APIAllowedCIDRs     []string              `json:"api_allowed_cidrs"`
 	Endpoint            *string               `json:"endpoint"`
 	VolumeStorageGB     int64                 `json:"volume_storage_gb"`
+	Kind                string                `json:"kind"`
+	CNIPlugin           string                `json:"cni_plugin"`
+	PodCIDR             string                `json:"pod_cidr"`
+	ServiceCIDR         string                `json:"service_cidr"`
+	EndpointAccess      string                `json:"endpoint_access"`
 	CreatedAt           *time.Time            `json:"created_at"`
 	UpdatedAt           *time.Time            `json:"updated_at"`
 }
@@ -146,6 +151,8 @@ type KubernetesCluster struct {
 // omitted, so the backend applies its default of 1. A zero Workers is omitted,
 // which the backend allows only with autoscaling enabled (it then starts at
 // MinWorkers). APIAllowedCIDRs is VPC zone only; empty is omitted (any address).
+// Empty CNIPlugin, PodCIDR and ServiceCIDR are omitted, so the backend applies
+// flannel, 10.42.0.0/16 and 10.43.0.0/16.
 type CreateKubernetesClusterRequest struct {
 	Name                string                 `json:"name"`
 	ZoneID              string                 `json:"zone_id"`
@@ -156,6 +163,9 @@ type CreateKubernetesClusterRequest struct {
 	Workers             int64                  `json:"workers,omitempty"`
 	Autoscaling         *KubernetesAutoscaling `json:"autoscaling,omitempty"`
 	APIAllowedCIDRs     []string               `json:"api_allowed_cidrs,omitempty"`
+	CNIPlugin           string                 `json:"cni_plugin,omitempty"`
+	PodCIDR             string                 `json:"pod_cidr,omitempty"`
+	ServiceCIDR         string                 `json:"service_cidr,omitempty"`
 }
 
 // UpdateKubernetesClusterRequest is the PATCH body: a nil field is left out and
@@ -283,6 +293,55 @@ func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("downloading the kubeconfig of Kubernetes cluster %s: %w", id, err)
 	}
 	return kc.Kubeconfig, nil
+}
+
+// ResizeKubernetesClusterPlanRequest moves every node to another plan, by slug.
+type ResizeKubernetesClusterPlanRequest struct {
+	NodePlan string `json:"node_plan"`
+}
+
+// UpgradeKubernetesNetworkRequest changes the pod network. An empty field is
+// omitted and stays as it is.
+type UpgradeKubernetesNetworkRequest struct {
+	CNIPlugin   string `json:"cni_plugin,omitempty"`
+	PodCIDR     string `json:"pod_cidr,omitempty"`
+	ServiceCIDR string `json:"service_cidr,omitempty"`
+}
+
+// ConfigureKubernetesEndpointAccessRequest chooses where the API server can be
+// reached from: public, private or dual. A nil APIAllowedCIDRs is omitted and
+// leaves the allow-list as it is.
+type ConfigureKubernetesEndpointAccessRequest struct {
+	EndpointAccess  string    `json:"endpoint_access"`
+	APIAllowedCIDRs *[]string `json:"api_allowed_cidrs,omitempty"`
+}
+
+// ResizeKubernetesClusterPlan starts moving every node to another plan.
+func (c *Client) ResizeKubernetesClusterPlan(ctx context.Context, id string, req ResizeKubernetesClusterPlanRequest) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, kubernetesClusterPath(id)+"/resize-plan", req, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("resizing the nodes of Kubernetes cluster %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// UpgradeKubernetesNetwork starts changing the CNI plugin or address ranges.
+func (c *Client) UpgradeKubernetesNetwork(ctx context.Context, id string, req UpgradeKubernetesNetworkRequest) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, kubernetesClusterPath(id)+"/upgrade-network", req, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("changing the network of Kubernetes cluster %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// ConfigureKubernetesEndpointAccess starts changing where the API server can be
+// reached from.
+func (c *Client) ConfigureKubernetesEndpointAccess(ctx context.Context, id string, req ConfigureKubernetesEndpointAccessRequest) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, kubernetesClusterPath(id)+"/endpoint-access", req, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("changing the endpoint access of Kubernetes cluster %s: %w", id, err)
+	}
+	return &ref, nil
 }
 
 func kubernetesClusterPath(id string) string {

@@ -34,6 +34,8 @@ func NewLoadBalancer() datasource.DataSource { return &LoadBalancerDataSource{} 
 type loadBalancerModel struct {
 	ID              types.String `tfsdk:"id"`
 	Name            types.String `tfsdk:"name"`
+	Kind            types.String `tfsdk:"kind"`
+	ZoneID          types.String `tfsdk:"zone_id"`
 	PublicIPID      types.String `tfsdk:"public_ip_id"`
 	PublicIPAddress types.String `tfsdk:"public_ip_address"`
 	NetworkID       types.String `tfsdk:"network_id"`
@@ -56,9 +58,11 @@ func (d *LoadBalancerDataSource) Metadata(_ context.Context, req datasource.Meta
 // Schema describes the attributes.
 func (d *LoadBalancerDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	attrs := selectorAttributes("load balancer", "lb_", false)
-	attrs["public_ip_id"] = schema.StringAttribute{Computed: true, Description: "Id of the public IP clients connect to."}
+	attrs["kind"] = schema.StringAttribute{Computed: true, Description: "\"vpc_native\" (a VPC zone, on a load_balancer public IP) or \"appliance\" (a standard zone, a managed load balancer VM with its own address)."}
+	attrs["zone_id"] = schema.StringAttribute{Computed: true, Description: "Zone the load balancer is in."}
+	attrs["public_ip_id"] = schema.StringAttribute{Computed: true, Description: "Id of the public IP clients connect to (vpc_native)."}
 	attrs["public_ip_address"] = schema.StringAttribute{Computed: true, Description: "The public IPv4 address clients connect to."}
-	attrs["network_id"] = schema.StringAttribute{Computed: true, Description: "Id of the VPC network the load balancer is in."}
+	attrs["network_id"] = schema.StringAttribute{Computed: true, Description: "Id of the VPC network the load balancer is in. Null for an appliance."}
 	attrs["subnet_id"] = schema.StringAttribute{Computed: true, Description: "Id of the subnet the targets are in."}
 	attrs["protocol"] = schema.StringAttribute{Computed: true, Description: "Protocol balanced. Always \"tcp\"."}
 	attrs["algorithm"] = schema.StringAttribute{Computed: true, Description: "How connections are spread: \"roundrobin\", \"leastconn\" or \"source\"."}
@@ -111,6 +115,7 @@ func (d *LoadBalancerDataSource) Read(ctx context.Context, req datasource.ReadRe
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, loadBalancerModel{
 		ID: types.StringValue(lb.ID), Name: types.StringValue(lb.Name),
+		Kind: types.StringValue(loadBalancerKind(lb)), ZoneID: types.StringValue(lb.ZoneID),
 		PublicIPID: types.StringValue(lb.PublicIPID), PublicIPAddress: resourcekit.OptionalString(lb.PublicIPAddress),
 		NetworkID: resourcekit.OptionalString(lb.NetworkID), SubnetID: types.StringValue(lb.SubnetID),
 		Protocol: types.StringValue(lb.Protocol), Algorithm: types.StringValue(lb.Algorithm),
@@ -118,6 +123,14 @@ func (d *LoadBalancerDataSource) Read(ctx context.Context, req datasource.ReadRe
 		CIDRList: cidrs, InstanceIDs: targets,
 		ObservedState: types.StringValue(lb.ObservedState), CreatedAt: resourcekit.Timestamp(lb.CreatedAt),
 	})...)
+}
+
+// loadBalancerKind is the kind; one made before kinds existed is vpc_native.
+func loadBalancerKind(lb client.LoadBalancer) string {
+	if lb.Kind == "" {
+		return client.LoadBalancerVPCNative
+	}
+	return lb.Kind
 }
 
 // loadBalancerTargets lists the targets that are not being removed, sorted.

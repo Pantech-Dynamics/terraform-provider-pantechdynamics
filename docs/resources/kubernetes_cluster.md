@@ -3,12 +3,12 @@
 page_title: "pantechdynamics_kubernetes_cluster Resource - pantechdynamics"
 subcategory: ""
 description: |-
-  A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH, and kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down). Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id, node_plan or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.
+  A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down); node_plan changes in place by moving every node to the new plan; cni_plugin, pod_cidr and service_cidr change in place by rebuilding the pod network (pods restart); endpoint_access changes in place. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.
 ---
 
 # pantechdynamics_kubernetes_cluster (Resource)
 
-A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH, and kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down). Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id, node_plan or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.
+A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down); node_plan changes in place by moving every node to the new plan; cni_plugin, pod_cidr and service_cidr change in place by rebuilding the pod network (pods restart); endpoint_access changes in place. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.
 
 ## Example Usage
 
@@ -59,8 +59,20 @@ resource "pantechdynamics_kubernetes_cluster" "prod" {
   node_plan = "s-2vcpu-4gb"
 
   # 1 (the default), or 3 where the zone is in ha_zone_ids. Changing it, the
-  # name, zone, subnet or plan replaces the cluster.
+  # name, zone or subnet replaces the cluster. A new node_plan changes in
+  # place: every node is replaced, one at a time, by one of the new plan.
   control_nodes = 1
+
+  # The pod network: flannel (default), wireguard (encrypted between nodes) or
+  # calico (network policies). The ranges default to 10.42.0.0/16 and
+  # 10.43.0.0/16. Changes rebuild the pod network in place; pods restart.
+  cni_plugin = "calico"
+  # pod_cidr     = "10.42.0.0/16"
+  # service_cidr = "10.43.0.0/16"
+
+  # Where the API server can be reached from: public (default), private (only
+  # inside the cluster's network) or dual. Changes in place.
+  endpoint_access = "public"
 
   # The autoscaler adds and removes workers between min_workers and max_workers
   # as pods need them. The cluster starts at min_workers. Workers are billed as
@@ -128,14 +140,18 @@ output "kubeconfig" {
 
 - `kubernetes_version_id` (String) Id of the Kubernetes version, starting with k8sv_, from the pantechdynamics_kubernetes_versions data source in zone_id. Changes in place by upgrading the cluster, which must be running: the new id must be one of available_upgrade_ids (the next patch or the next minor version). Upgrades never go down and never happen on their own.
 - `name` (String) Name of the cluster: 1 to 40 lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen. Unique in the organization. Changing it replaces the cluster.
-- `node_plan` (String) Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and is not compared. Changing it replaces the cluster.
+- `node_plan` (String) Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Changes in place: every node, control and worker, is replaced one at a time with a node of the new plan, and the cluster must be running. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.
 - `zone_id` (String) Zone to create the cluster in, for example "af-abj-2" (a VPC zone, which needs subnet_id) or "af-abj-1" (a standard zone, which takes no subnet_id). The pantechdynamics_kubernetes_versions data source lists the versions per zone. Changing it replaces the cluster.
 
 ### Optional
 
 - `api_allowed_cidrs` (Set of String) VPC zone only (needs subnet_id): the source addresses allowed to reach the API server, as at most 20 IPv4 CIDRs, for example ["203.0.113.0/24"]. Empty (the default) allows any address. Changes in place: the set is the whole list, and removing it allows any address again.
 - `autoscaling` (Attributes) The cluster autoscaler, which adds and removes workers between min_workers and max_workers as pods need them. Workers are billed as VMs of node_plan while they run, and your credit and account limits are checked for max_workers. The cluster starts at min_workers. Changes in place. Removing it (or setting enabled = false) turns the autoscaler off and needs workers set: the count it lands on. (see [below for nested schema](#nestedatt--autoscaling))
+- `cni_plugin` (String) The pod network plugin: "flannel" (the default), "wireguard" (flannel with traffic between nodes encrypted) or "calico" (network policies). Changes in place by rebuilding the pod network; pods restart.
 - `control_nodes` (Number) Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.
+- `endpoint_access` (String) Where the API server can be reached from: "public" (the default, from the internet, limited by api_allowed_cidrs), "private" (only from inside the cluster's network) or "dual" (both). Set at create once the cluster runs, and changes in place.
+- `pod_cidr` (String) The pods' IPv4 address range. Defaults to "10.42.0.0/16". Change it only when it overlaps a network the pods must reach. Changes in place by rebuilding the pod network; pods restart.
+- `service_cidr` (String) The services' IPv4 address range. Defaults to "10.43.0.0/16". Changes in place by rebuilding the pod network; pods restart.
 - `subnet_id` (String) Id of the subnet the nodes go in, from pantechdynamics_subnet. Required in a VPC zone, and must be omitted in a standard zone. Changing it replaces the cluster.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `workers` (Number) A fixed number of worker nodes, 1 to 10. Required unless autoscaling is enabled, and must not be set while it is: the autoscaler then owns the count, which is reported here and never causes a diff. Changes in place by scaling the cluster, which must be running. Added workers are billed as VMs of node_plan. To go from autoscaling back to a fixed count, remove autoscaling and set workers.
@@ -147,6 +163,7 @@ output "kubeconfig" {
 - `endpoint` (String) The API server's URL, once the cluster has one. Null until then. The kubeconfig points kubectl at it.
 - `id` (String) Identifier of the cluster, starting with k8s_.
 - `in_sync` (Boolean) False while a scale or upgrade has not finished.
+- `kind` (String) How the platform runs the cluster, for example "appliance".
 - `kube_config` (String, Sensitive) The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key) and is refreshed only when the state holds none.
 - `kubernetes_version` (String) The Kubernetes version the cluster runs, for example "1.31.2".
 - `network_id` (String) Id of the VPC network the nodes are in. Null in a standard zone.
@@ -197,7 +214,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 
 ```shell
 # A Kubernetes cluster is imported by its id. node_plan cannot be read back:
-# set it in the configuration, and the next apply records it without replacing
+# set it in the configuration, and the next apply records it without resizing
 # the cluster. The kubeconfig is downloaded on the first refresh.
 terraform import pantechdynamics_kubernetes_cluster.prod k8s_06ggex1abcdefghjkmnpqrstvw
 ```

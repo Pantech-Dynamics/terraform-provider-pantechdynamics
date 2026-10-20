@@ -49,6 +49,9 @@ type clusterAPI interface {
 	GetKubernetesCluster(ctx context.Context, id string) (*client.KubernetesCluster, error)
 	UpdateKubernetesCluster(ctx context.Context, id string, req client.UpdateKubernetesClusterRequest) (*client.OperationReference, error)
 	UpgradeKubernetesCluster(ctx context.Context, id string, req client.UpgradeKubernetesClusterRequest) (*client.OperationReference, error)
+	ResizeKubernetesClusterPlan(ctx context.Context, id string, req client.ResizeKubernetesClusterPlanRequest) (*client.OperationReference, error)
+	UpgradeKubernetesNetwork(ctx context.Context, id string, req client.UpgradeKubernetesNetworkRequest) (*client.OperationReference, error)
+	ConfigureKubernetesEndpointAccess(ctx context.Context, id string, req client.ConfigureKubernetesEndpointAccessRequest) (*client.OperationReference, error)
 	DeleteKubernetesCluster(ctx context.Context, id string) (*client.OperationReference, error)
 	GetKubeconfig(ctx context.Context, id string) (string, error)
 	GetOperation(ctx context.Context, id string) (*client.Operation, error)
@@ -84,7 +87,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 	replaceStr := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	resp.Schema = schema.Schema{
-		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH, and kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down). Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id, node_plan or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.",
+		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down); node_plan changes in place by moving every node to the new plan; cni_plugin, pod_cidr and service_cidr change in place by rebuilding the pod network (pods restart); endpoint_access changes in place. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the cluster, starting with k8s_.",
@@ -114,13 +117,8 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IDPrefix("subnet", "snet_")},
 			},
 			"node_plan": schema.StringAttribute{
-				Description: "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and is not compared. Changing it replaces the cluster.",
+				Description: "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Changes in place: every node, control and worker, is replaced one at a time with a node of the new plan, and the cluster must be running. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIf(
-					replaceUnlessImported,
-					"Replaces the cluster when the plan changes, but not when the state holds none (after an import).",
-					"Replaces the cluster when the plan changes, but not when the state holds none (after an import).",
-				)},
 			},
 			"control_nodes": schema.Int64Attribute{
 				Description:   "Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.",
@@ -167,6 +165,39 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 			},
 			"endpoint": schema.StringAttribute{
 				Description:   "The API server's URL, once the cluster has one. Null until then. The kubeconfig points kubectl at it.",
+				Computed:      true,
+				PlanModifiers: keep,
+			},
+			"cni_plugin": schema.StringAttribute{
+				Description:   "The pod network plugin: \"flannel\" (the default), \"wireguard\" (flannel with traffic between nodes encrypted) or \"calico\" (network policies). Changes in place by rebuilding the pod network; pods restart.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: keep,
+				Validators:    []validator.String{resourcekit.OneOf("flannel", "wireguard", "calico")},
+			},
+			"pod_cidr": schema.StringAttribute{
+				Description:   "The pods' IPv4 address range. Defaults to \"10.42.0.0/16\". Change it only when it overlaps a network the pods must reach. Changes in place by rebuilding the pod network; pods restart.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: keep,
+				Validators:    []validator.String{resourcekit.IPv4CIDR()},
+			},
+			"service_cidr": schema.StringAttribute{
+				Description:   "The services' IPv4 address range. Defaults to \"10.43.0.0/16\". Changes in place by rebuilding the pod network; pods restart.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: keep,
+				Validators:    []validator.String{resourcekit.IPv4CIDR()},
+			},
+			"endpoint_access": schema.StringAttribute{
+				Description:   "Where the API server can be reached from: \"public\" (the default, from the internet, limited by api_allowed_cidrs), \"private\" (only from inside the cluster's network) or \"dual\" (both). Set at create once the cluster runs, and changes in place.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: keep,
+				Validators:    []validator.String{resourcekit.OneOf("public", "private", "dual")},
+			},
+			"kind": schema.StringAttribute{
+				Description:   "How the platform runs the cluster, for example \"appliance\".",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
@@ -260,6 +291,7 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	checkUpgrade(ctx, req, resp)
 	planWorkers(ctx, req, resp)
+	planNodeResize(ctx, req, resp)
 }
 
 // Create orders the cluster, saves its id straight away, waits until it is
@@ -293,6 +325,13 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		addWaitError(&resp.Diagnostics, "Error creating Kubernetes cluster", id, err)
 		return
 	}
+	// The create takes no endpoint access: set it once the cluster runs.
+	if mode, ok := endpointAccessChange(types.StringValue("public"), plan.EndpointAccess); ok {
+		ref, err := r.api.ConfigureKubernetesEndpointAccess(ctx, id, client.ConfigureKubernetesEndpointAccessRequest{EndpointAccess: mode})
+		if !r.applied(ctx, ref, err, "Error setting the endpoint access of Kubernetes cluster", pendingModel(plan, id), id, &resp.State, &resp.Diagnostics) {
+			return
+		}
+	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 }
 
@@ -321,9 +360,11 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	resp.Diagnostics.Append(resp.State.Set(ctx, m)...)
 }
 
-// Update upgrades the cluster when kubernetes_version_id changed, then sends
-// one PATCH with whichever of workers, autoscaling and api_allowed_cidrs
-// changed, waiting for each to finish. A plan that changes only the timeouts
+// Update upgrades the cluster when kubernetes_version_id changed, moves its
+// nodes when node_plan changed, rebuilds the pod network when cni_plugin,
+// pod_cidr or service_cidr changed, sends one PATCH with whichever of workers,
+// autoscaling and api_allowed_cidrs changed, then sets endpoint_access,
+// waiting for each to finish. A plan that changes only the timeouts
 // block, or fills node_plan after an import, sends nothing.
 func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state model
@@ -348,6 +389,18 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 			return
 		}
 	}
+	if slug, ok := nodePlanChange(state.NodePlan, plan.NodePlan); ok {
+		ref, err := r.api.ResizeKubernetesClusterPlan(ctx, id, client.ResizeKubernetesClusterPlanRequest{NodePlan: slug})
+		if !r.applied(ctx, ref, err, "Error resizing the nodes of Kubernetes cluster", state, id, &resp.State, &resp.Diagnostics) {
+			return
+		}
+	}
+	if net, ok := toNetworkRequest(state, plan); ok {
+		ref, err := r.api.UpgradeKubernetesNetwork(ctx, id, net)
+		if !r.applied(ctx, ref, err, "Error changing the network of Kubernetes cluster", prev, id, &resp.State, &resp.Diagnostics) {
+			return
+		}
+	}
 	body, changed, diags := toUpdateRequest(ctx, state, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -356,6 +409,12 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	if changed {
 		ref, err := r.api.UpdateKubernetesCluster(ctx, id, body)
 		if !r.applied(ctx, ref, err, "Error changing Kubernetes cluster", prev, id, &resp.State, &resp.Diagnostics) {
+			return
+		}
+	}
+	if mode, ok := endpointAccessChange(state.EndpointAccess, plan.EndpointAccess); ok {
+		ref, err := r.api.ConfigureKubernetesEndpointAccess(ctx, id, client.ConfigureKubernetesEndpointAccessRequest{EndpointAccess: mode})
+		if !r.applied(ctx, ref, err, "Error changing the endpoint access of Kubernetes cluster", prev, id, &resp.State, &resp.Diagnostics) {
 			return
 		}
 	}
@@ -604,7 +663,8 @@ func allMapped(fields []client.FieldError) bool {
 // attributeFor maps a 422 field to a schema attribute.
 func attributeFor(field string) (path.Path, bool) {
 	switch field {
-	case "name", "zone_id", "kubernetes_version_id", "subnet_id", "node_plan", "control_nodes", "workers", "autoscaling", "api_allowed_cidrs":
+	case "name", "zone_id", "kubernetes_version_id", "subnet_id", "node_plan", "control_nodes", "workers", "autoscaling", "api_allowed_cidrs",
+		"cni_plugin", "pod_cidr", "service_cidr", "endpoint_access":
 		return path.Root(field), true
 	}
 	return path.Path{}, false

@@ -53,6 +53,11 @@ type kubernetesClusterModel struct {
 	APIAllowedCIDRs     types.List   `tfsdk:"api_allowed_cidrs"`
 	Endpoint            types.String `tfsdk:"endpoint"`
 	VolumeStorageGB     types.Int64  `tfsdk:"volume_storage_gb"`
+	Kind                types.String `tfsdk:"kind"`
+	CNIPlugin           types.String `tfsdk:"cni_plugin"`
+	PodCIDR             types.String `tfsdk:"pod_cidr"`
+	ServiceCIDR         types.String `tfsdk:"service_cidr"`
+	EndpointAccess      types.String `tfsdk:"endpoint_access"`
 	CreatedAt           types.String `tfsdk:"created_at"`
 }
 
@@ -109,6 +114,11 @@ func (d *KubernetesClusterDataSource) Schema(_ context.Context, _ datasource.Sch
 	attrs["api_allowed_cidrs"] = schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "IPv4 CIDRs allowed to reach the API server, sorted. Empty means any address."}
 	attrs["endpoint"] = schema.StringAttribute{Computed: true, Description: "The API server's URL. Null until the cluster has one."}
 	attrs["volume_storage_gb"] = schema.Int64Attribute{Computed: true, Description: "Storage, in GB, that the workloads' persistent volume claims use, billed with the nodes' disks."}
+	attrs["kind"] = schema.StringAttribute{Computed: true, Description: "How the platform runs the cluster, for example \"appliance\"."}
+	attrs["cni_plugin"] = schema.StringAttribute{Computed: true, Description: "The pod network plugin: \"flannel\", \"wireguard\" or \"calico\"."}
+	attrs["pod_cidr"] = schema.StringAttribute{Computed: true, Description: "The pods' address range."}
+	attrs["service_cidr"] = schema.StringAttribute{Computed: true, Description: "The services' address range."}
+	attrs["endpoint_access"] = schema.StringAttribute{Computed: true, Description: "Where the API server can be reached from: \"public\", \"private\" or \"dual\"."}
 	attrs["created_at"] = schema.StringAttribute{Computed: true, Description: "When the cluster was created, in RFC 3339 UTC, to the second."}
 	resp.Schema = schema.Schema{
 		Description: "Looks up one existing Kubernetes cluster by id or name, to read its version, network, size, autoscaling range, API server endpoint and allow-list, or volume storage without managing it. It does not expose the kubeconfig: manage the cluster with pantechdynamics_kubernetes_cluster, or download the kubeconfig from the console or the API. Failed and deleted clusters are not found.",
@@ -178,6 +188,8 @@ func (d *KubernetesClusterDataSource) Read(ctx context.Context, req datasource.R
 		ObservedState: types.StringValue(k.ObservedState), InSync: types.BoolValue(k.InSync),
 		AvailableUpgradeIDs: upgradeList, Autoscaling: auto, APIAllowedCIDRs: cidrList,
 		Endpoint: resourcekit.OptionalString(k.Endpoint), VolumeStorageGB: types.Int64Value(k.VolumeStorageGB),
+		Kind: types.StringValue(k.Kind), CNIPlugin: types.StringValue(k.CNIPlugin), PodCIDR: types.StringValue(k.PodCIDR),
+		ServiceCIDR: types.StringValue(k.ServiceCIDR), EndpointAccess: types.StringValue(k.EndpointAccess),
 		CreatedAt: resourcekit.Timestamp(k.CreatedAt),
 	})...)
 }

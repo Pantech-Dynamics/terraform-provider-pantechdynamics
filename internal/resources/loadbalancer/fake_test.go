@@ -53,8 +53,17 @@ func (f *fakeAPI) CreateLoadBalancer(_ context.Context, req client.CreateLoadBal
 		state = "active"
 	}
 	// The backend defaults the algorithm, the private port and the allow-list.
+	kind, zone, network := req.Kind, req.ZoneID, ptr("net_1")
+	if kind == "" {
+		kind = client.LoadBalancerVPCNative
+	}
+	if kind == client.LoadBalancerVPCNative {
+		zone = "af-abj-2" // taken from the subnet
+	} else {
+		network = nil
+	}
 	lb := client.LoadBalancer{
-		ID: id, Name: req.Name, PublicIPID: req.PublicIPID, PublicIPAddress: ptr("203.0.113.9"), NetworkID: ptr("net_1"),
+		ID: id, Name: req.Name, Kind: kind, ZoneID: zone, PublicIPID: req.PublicIPID, PublicIPAddress: ptr("203.0.113.9"), NetworkID: network,
 		SubnetID: req.SubnetID, Protocol: "tcp", Algorithm: req.Algorithm, PublicPort: req.PublicPort, PrivatePort: req.PublicPort,
 		CIDRList: req.CIDRList, Members: members(req.InstanceIDs), DesiredState: "present", ObservedState: state,
 		InSync: !f.outOfSync, CreatedAt: now(), UpdatedAt: now(),

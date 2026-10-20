@@ -38,11 +38,13 @@ output "web_address" {
 - `cidr_list` (Set of String) Source CIDRs allowed to connect. Empty allows any source.
 - `created_at` (String) When the load balancer was created, in RFC 3339 UTC, to the second.
 - `instance_ids` (Set of String) Ids of the target instances, leaving out any being removed.
-- `network_id` (String) Id of the VPC network the load balancer is in.
+- `kind` (String) "vpc_native" (a VPC zone, on a load_balancer public IP) or "appliance" (a standard zone, a managed load balancer VM with its own address).
+- `network_id` (String) Id of the VPC network the load balancer is in. Null for an appliance.
 - `observed_state` (String) State of the load balancer as the platform sees it, for example "active".
 - `private_port` (Number) Port on each target.
 - `protocol` (String) Protocol balanced. Always "tcp".
 - `public_ip_address` (String) The public IPv4 address clients connect to.
-- `public_ip_id` (String) Id of the public IP clients connect to.
+- `public_ip_id` (String) Id of the public IP clients connect to (vpc_native).
 - `public_port` (Number) TCP port clients connect to.
 - `subnet_id` (String) Id of the subnet the targets are in.
+- `zone_id` (String) Zone the load balancer is in.

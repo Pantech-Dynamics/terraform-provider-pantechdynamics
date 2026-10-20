@@ -44,8 +44,20 @@ resource "pantechdynamics_kubernetes_cluster" "prod" {
   node_plan = "s-2vcpu-4gb"
 
   # 1 (the default), or 3 where the zone is in ha_zone_ids. Changing it, the
-  # name, zone, subnet or plan replaces the cluster.
+  # name, zone or subnet replaces the cluster. A new node_plan changes in
+  # place: every node is replaced, one at a time, by one of the new plan.
   control_nodes = 1
+
+  # The pod network: flannel (default), wireguard (encrypted between nodes) or
+  # calico (network policies). The ranges default to 10.42.0.0/16 and
+  # 10.43.0.0/16. Changes rebuild the pod network in place; pods restart.
+  cni_plugin = "calico"
+  # pod_cidr     = "10.42.0.0/16"
+  # service_cidr = "10.43.0.0/16"
+
+  # Where the API server can be reached from: public (default), private (only
+  # inside the cluster's network) or dual. Changes in place.
+  endpoint_access = "public"
 
   # The autoscaler adds and removes workers between min_workers and max_workers
   # as pods need them. The cluster starts at min_workers. Workers are billed as

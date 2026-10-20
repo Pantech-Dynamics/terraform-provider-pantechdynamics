@@ -49,6 +49,8 @@ var (
 	_ resource.Resource                = &Resource{}
 	_ resource.ResourceWithConfigure   = &Resource{}
 	_ resource.ResourceWithImportState = &Resource{}
+
+	_ resource.ResourceWithValidateConfig = &Resource{}
 )
 
 // Resource manages one load balancer.
@@ -68,11 +70,10 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 
 // Schema describes the attributes.
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	replaceStr := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	emptySet := types.SetValueMust(types.StringType, nil)
 	resp.Schema = schema.Schema{
-		Description: "Spreads one TCP port of a load_balancer public IP across instances in one subnet of a VPC network. One public IP can carry several load balancers, one per public port. A load balancer opens nothing on its own: the subnet's firewall must also allow private_port, with a pantechdynamics_firewall_rule. The name, algorithm and targets change in place; changing the public IP, subnet, ports or cidr_list replaces the load balancer.",
+		Description: "Spreads one TCP port across instances. There are two kinds. A vpc_native load balancer (VPC zone, no extra fee) uses one port of a load_balancer public IP and targets instances in one subnet of its network; one public IP can carry several, one per public port, and the subnet's firewall must also allow private_port, with a pantechdynamics_firewall_rule. An appliance load balancer (standard zone) is a managed load balancer VM with its own public address, billed as that VM; it targets instances in its zone, whose security groups must allow private_port. The name, algorithm and targets change in place; changing the kind, zone, public IP, subnet, ports or cidr_list replaces the load balancer.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the load balancer, starting with lb_.",
@@ -84,16 +85,31 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Required:    true,
 				Validators:  []validator.String{resourcekit.NameLength("load balancer", maxNameLen)},
 			},
+			"kind": schema.StringAttribute{
+				Description:   "\"vpc_native\" (a VPC zone: needs public_ip_id and subnet_id) or \"appliance\" (a standard zone: needs zone_id, and takes no public_ip_id or subnet_id). Left out, it is vpc_native when subnet_id is set and appliance when only zone_id is. Changing it replaces the load balancer.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), kindDefault{}, stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{resourcekit.OneOf(client.LoadBalancerVPCNative, client.LoadBalancerAppliance)},
+			},
+			"zone_id": schema.StringAttribute{
+				Description:   "Zone of the load balancer, for example \"af-abj-1\". Required for an appliance. A vpc_native load balancer takes it from subnet_id, so leave it out there. Changing it replaces the load balancer.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()},
+			},
 			"public_ip_id": schema.StringAttribute{
-				Description:   "Id of the public IP clients connect to. It must be active and have purpose load_balancer. Changing it replaces the load balancer.",
-				Required:      true,
-				PlanModifiers: replaceStr,
+				Description:   "vpc_native only, and required there: id of the public IP clients connect to. It must be active and have purpose load_balancer. Changing it replaces the load balancer.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{resourcekit.IDPrefix("public IP", "pip_")},
 			},
 			"subnet_id": schema.StringAttribute{
-				Description:   "Id of a subnet in the public IP's network. Every target must be in it. Changing it replaces the load balancer.",
-				Required:      true,
-				PlanModifiers: replaceStr,
+				Description:   "vpc_native only, and required there: id of a subnet in the public IP's network. Every target must be in it. Changing it replaces the load balancer.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{resourcekit.IDPrefix("subnet", "snet_")},
 			},
 			"algorithm": schema.StringAttribute{
@@ -126,7 +142,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.Set{cidrListValidator{}},
 			},
 			"instance_ids": schema.SetAttribute{
-				Description: "Ids of the instances to spread traffic across, at most 50, each in subnet_id. Empty (the default) means no targets yet. Changes in place: the set is the whole list of targets. An instance cannot be deleted while it is a target.",
+				Description: "Ids of the instances to spread traffic across, at most 50: for vpc_native each in subnet_id, for an appliance each in zone_id. Empty (the default) means no targets yet. Changes in place: the set is the whole list of targets. An instance cannot be deleted while it is a target.",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
@@ -139,7 +155,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: keep,
 			},
 			"network_id": schema.StringAttribute{
-				Description:   "Id of the VPC network the load balancer is in.",
+				Description:   "Id of the VPC network the load balancer is in. Null for an appliance.",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
@@ -164,6 +180,19 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{Create: true, Update: true, Delete: true}),
 		},
 	}
+}
+
+// ValidateConfig checks, at plan time, that the attributes fit the kind.
+func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var kind, zone, publicIP, subnet types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("kind"), &kind)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("zone_id"), &zone)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("public_ip_id"), &publicIP)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subnet_id"), &subnet)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	checkPlacement(kind, zone, publicIP, subnet, &resp.Diagnostics)
 }
 
 // Configure receives the API client built by the provider.
@@ -399,6 +428,7 @@ func removing(lb *client.LoadBalancer) bool {
 var createHints = map[string]string{
 	client.CodePublicIPNotForLoadBalancer: "Use an active pantechdynamics_public_ip with purpose = \"load_balancer\" in the subnet's network.",
 	client.CodePortInUse:                  "Another load balancer on this public IP already uses public_port. Choose another port, or delete that load balancer first.",
+	client.CodeInsufficientCredit:         "An appliance load balancer runs on a VM billed to your account. Add credit or a card, then apply again.",
 }
 
 // updateHints explain the update refusals a user can act on.
@@ -409,7 +439,7 @@ var updateHints = map[string]string{
 // attributeFor maps a 422 field to a schema attribute.
 func attributeFor(field string) (path.Path, bool) {
 	switch field {
-	case "name", "public_ip_id", "subnet_id", "algorithm", "public_port", "private_port", "cidr_list", "instance_ids":
+	case "name", "kind", "zone_id", "public_ip_id", "subnet_id", "algorithm", "public_port", "private_port", "cidr_list", "instance_ids":
 		return path.Root(field), true
 	}
 	return path.Path{}, false

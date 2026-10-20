@@ -30,6 +30,10 @@ func TestLoadBalancerWritesUseTheRightRequest(t *testing.T) {
 			_, err := c.CreateLoadBalancer(context.Background(), CreateLoadBalancerRequest{Name: "web", PublicIPID: "pip_1", SubnetID: "snet_1", Algorithm: "source", PublicPort: 80, PrivatePort: &port, CIDRList: []string{"10.0.0.0/8"}, InstanceIDs: []string{"vm_1"}})
 			return err
 		}, http.MethodPost, "/v1/load-balancers", `{"name":"web","public_ip_id":"pip_1","subnet_id":"snet_1","algorithm":"source","public_port":80,"private_port":8080,"cidr_list":["10.0.0.0/8"],"instance_ids":["vm_1"]}`},
+		{"create an appliance sends the zone and leaves the address out", func(c *Client) error {
+			_, err := c.CreateLoadBalancer(context.Background(), CreateLoadBalancerRequest{Name: "web", Kind: LoadBalancerAppliance, ZoneID: "af-abj-1", PublicPort: 80, InstanceIDs: []string{"vm_1"}})
+			return err
+		}, http.MethodPost, "/v1/load-balancers", `{"name":"web","kind":"appliance","zone_id":"af-abj-1","public_port":80,"instance_ids":["vm_1"]}`},
 		{"update name only", func(c *Client) error {
 			_, err := c.UpdateLoadBalancer(context.Background(), "lb_1", UpdateLoadBalancerRequest{Name: &name})
 			return err
