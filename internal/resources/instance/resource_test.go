@@ -9,8 +9,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -490,27 +488,39 @@ func TestImportState(t *testing.T) {
 	}
 }
 
-// replaceUnlessImported must never destroy a machine only because the API cannot
-// report the SSH key it was created with.
-func TestReplaceUnlessImported(t *testing.T) {
+// sshKeyChanged must never restart a machine only because the API cannot
+// report the SSH key it holds: after an import state has none, and removing the
+// key from the configuration asks for nothing.
+func TestSSHKeyChanged(t *testing.T) {
 	tests := []struct {
-		name          string
-		state, config types.String
-		want          bool
+		name        string
+		state, plan types.String
+		want        bool
 	}{
 		{"unchanged", types.StringValue("sshk_1"), types.StringValue("sshk_1"), false},
-		{"changed key replaces", types.StringValue("sshk_1"), types.StringValue("sshk_2"), true},
-		{"key removed replaces", types.StringValue("sshk_1"), types.StringNull(), true},
-		{"imported (no state value) does not replace", types.StringNull(), types.StringValue("sshk_1"), false},
+		{"changed key is installed", types.StringValue("sshk_1"), types.StringValue("sshk_2"), true},
+		{"key removed changes nothing", types.StringValue("sshk_1"), types.StringNull(), false},
+		{"imported (no state value) changes nothing", types.StringNull(), types.StringValue("sshk_1"), false},
+		{"unknown until apply waits", types.StringValue("sshk_1"), types.StringUnknown(), false},
 		{"nothing either side", types.StringNull(), types.StringNull(), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var resp stringplanmodifier.RequiresReplaceIfFuncResponse
-			replaceUnlessImported(ctx, planmodifier.StringRequest{StateValue: tt.state, ConfigValue: tt.config}, &resp)
-			if resp.RequiresReplace != tt.want {
-				t.Fatalf("RequiresReplace = %v, want %v", resp.RequiresReplace, tt.want)
+			if got := sshKeyChanged(tt.state, tt.plan); got != tt.want {
+				t.Fatalf("sshKeyChanged = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A new key is installed in place now (docs: ssh_key_id), so nothing about the
+// attribute may plan a replacement.
+func TestSSHKeyIDDoesNotReplace(t *testing.T) {
+	attr, ok := testSchema(t).Attributes["ssh_key_id"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("ssh_key_id is not a string attribute")
+	}
+	if len(attr.PlanModifiers) != 0 {
+		t.Fatalf("ssh_key_id has %d plan modifiers; a key change must not replace the instance", len(attr.PlanModifiers))
 	}
 }

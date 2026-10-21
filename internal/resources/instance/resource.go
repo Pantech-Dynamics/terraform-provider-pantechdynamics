@@ -45,6 +45,7 @@ type instanceAPI interface {
 	StartInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	StopInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	ResizeInstance(ctx context.Context, id, planSlug string) (*client.OperationReference, error)
+	ChangeInstanceSSHKey(ctx context.Context, id, sshKeyID string) (*client.OperationReference, error)
 	ChangeInstanceSecurityGroup(ctx context.Context, id, securityGroupID string) (*client.OperationReference, error)
 	AttachInstancePrivateNetwork(ctx context.Context, id string) (*client.OperationReference, error)
 	DetachInstancePrivateNetwork(ctx context.Context, id string) (*client.OperationReference, error)
@@ -106,13 +107,8 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"ssh_key_id": schema.StringAttribute{
-				Description: "Id of the SSH key to install, from pantechdynamics_ssh_key. The API does not report which key an instance was created with, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Changing it replaces the instance.",
+				Description: "Id of the SSH key to install, from pantechdynamics_ssh_key. Changing it gives the instance the new key in place: it is restarted, about two minutes of downtime, and afterwards only the new key logs in (keys added on the server by hand keep working). A stopped instance is started for the change. The API does not report which key an instance holds, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Removing it changes nothing on the instance.",
 				Optional:    true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIf(
-					replaceUnlessImported,
-					"Replaces the instance when the SSH key changes, but not when the state holds none (after an import).",
-					"Replaces the instance when the SSH key changes, but not when the state holds none (after an import).",
-				)},
 			},
 			"region": schema.StringAttribute{
 				Description: "Region to create the instance in, for example af-abj. Defaults to the platform's default region. Changing it replaces the instance.",
@@ -210,8 +206,12 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 // state, but not when the state holds none. The API never reports the SSH key,
 // so an imported instance has none in state, and replacing it for that would
 // destroy a machine to fix a gap in our own data.
-func replaceUnlessImported(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-	resp.RequiresReplace = !req.StateValue.IsNull() && !req.ConfigValue.Equal(req.StateValue)
+// sshKeyChanged reports a key to install: a new one where state held another.
+// State holds none after an import, and then nothing is compared, so adopting
+// an imported instance never restarts it; removing the key from the
+// configuration changes nothing on the instance either.
+func sshKeyChanged(state, plan types.String) bool {
+	return !state.IsNull() && knownString(plan) != "" && !plan.Equal(state)
 }
 
 // Configure receives the API client built by the provider. Terraform calls it
@@ -344,6 +344,7 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	renamed := !plan.Name.Equal(state.Name)
 	groupChanged := knownString(plan.SecurityGroupID) != "" && !plan.SecurityGroupID.Equal(state.SecurityGroupID)
 	planChanged := !plan.PlanSlug.Equal(state.PlanSlug)
+	keyChanged := sshKeyChanged(state.SSHKeyID, plan.SSHKeyID)
 	powerChanged := !plan.DesiredState.Equal(state.DesiredState)
 	wantNetwork := !plan.PrivateNetwork.IsNull() && !plan.PrivateNetwork.IsUnknown()
 	attach := wantNetwork && plan.PrivateNetwork.ValueBool() && !state.PrivateNetwork.ValueBool()
@@ -390,6 +391,18 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 		}
 	}
 
+	if keyChanged {
+		if err := r.changeSSHKey(ctx, id, plan.SSHKeyID.ValueString()); err != nil {
+			addUpdateError(&resp.Diagnostics, "Error changing the SSH key", id, err)
+			r.refresh(ctx, state, id, &resp.State, &resp.Diagnostics)
+			return
+		}
+		r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	// Attach last: a group change in the same apply may be what makes the group
 	// acceptable for the private network.
 	if attach {
@@ -400,9 +413,9 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 		}
 	}
 
-	// A group change or a resize moves the instance, so the power state is checked
-	// again even when the configuration did not change it.
-	if powerChanged || groupChanged || planChanged {
+	// A group change, a resize or a key change moves the instance, so the power
+	// state is checked again even when the configuration did not change it.
+	if powerChanged || groupChanged || planChanged || keyChanged {
 		if err := r.applyPower(ctx, id, plan.DesiredState.ValueString()); err != nil {
 			addWaitError(&resp.Diagnostics, "Error changing the instance power state", id, err)
 			r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)

@@ -134,6 +134,10 @@ type resizeRequest struct {
 	PlanSlug string `json:"plan_slug"`
 }
 
+type changeSSHKeyRequest struct {
+	SSHKeyID string `json:"ssh_key_id"`
+}
+
 // securityGroupRequest names the group an instance should use.
 type securityGroupRequest struct {
 	SecurityGroupID string `json:"security_group_id"`
@@ -227,6 +231,20 @@ func (c *Client) ResizeInstance(ctx context.Context, id, planSlug string) (*Oper
 	var ref OperationReference
 	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/resize", resizeRequest{PlanSlug: planSlug}, &ref, replaySafe()); err != nil {
 		return nil, fmt.Errorf("resizing instance %s: %w", id, err)
+	}
+	return &ref, nil
+}
+
+// ChangeInstanceSSHKey gives a running instance another of the account's SSH
+// keys and returns the operation to follow. The platform stops the instance,
+// installs the key and starts it again; the previous key stops working. A
+// stopped instance is refused with 409, an unknown key with the field error
+// SSH_KEY_NOT_FOUND. It is retried on gateway errors because the public API
+// replays it on the same Idempotency-Key.
+func (c *Client) ChangeInstanceSSHKey(ctx context.Context, id, sshKeyID string) (*OperationReference, error) {
+	var ref OperationReference
+	if err := c.do(ctx, http.MethodPost, instancePath(id)+"/change-ssh-key", changeSSHKeyRequest{SSHKeyID: sshKeyID}, &ref, replaySafe()); err != nil {
+		return nil, fmt.Errorf("changing the SSH key of instance %s: %w", id, err)
 	}
 	return &ref, nil
 }

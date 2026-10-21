@@ -36,6 +36,22 @@ func (r *Resource) resize(ctx context.Context, id, planSlug string) error {
 	return r.api.WaitForOperation(ctx, ref.OperationID, r.hasPlan(id, planSlug))
 }
 
+// changeSSHKey gives the instance another SSH key. The platform only accepts
+// this on a running instance, so a stopped one is started first. The platform
+// then stops it, installs the key and starts it again. Nothing on the instance
+// says which key it holds, so the wait is the operation's alone, which only
+// succeeds once the instance is running again.
+func (r *Resource) changeSSHKey(ctx context.Context, id, sshKeyID string) error {
+	if err := r.applyPower(ctx, id, client.InstanceRunning); err != nil {
+		return err
+	}
+	ref, err := r.api.ChangeInstanceSSHKey(ctx, id, sshKeyID)
+	if err != nil {
+		return err
+	}
+	return r.api.WaitForOperation(ctx, ref.OperationID, nil)
+}
+
 // hasSecurityGroup finishes a group change when the instance reports the new group.
 func (r *Resource) hasSecurityGroup(id, want string) client.DoneCheck {
 	return func(ctx context.Context) (bool, error) {

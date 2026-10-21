@@ -144,6 +144,66 @@ func TestResizeInPlace(t *testing.T) {
 	})
 }
 
+func TestSSHKeyChangeInPlace(t *testing.T) {
+	t.Run("a running instance gets the new key and nothing else is touched", func(t *testing.T) {
+		api := seeded(instanceWith("running", "individual"))
+		resp := updateWith(t, api, "running", map[string]tftypes.Value{"ssh_key_id": str("sshk_2")})
+
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		if len(api.keyChanges) != 1 || api.keyChanges[0] != "sshk_2" || api.starts != 0 || api.stops != 0 ||
+			api.refused != 0 || api.creates != 0 || api.deletes != 0 {
+			t.Fatalf("keyChanges = %v, starts = %d, stops = %d, refused = %d, creates = %d, deletes = %d",
+				api.keyChanges, api.starts, api.stops, api.refused, api.creates, api.deletes)
+		}
+		if got := getModel(t, resp.State).SSHKeyID.ValueString(); got != "sshk_2" {
+			t.Fatalf("ssh_key_id in state = %q", got)
+		}
+	})
+
+	t.Run("a stopped instance is started for the change and stopped again", func(t *testing.T) {
+		api := seeded(instanceWith("stopped", "individual"))
+		resp := updateWith(t, api, "stopped", map[string]tftypes.Value{"ssh_key_id": str("sshk_2")})
+
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		if api.starts != 1 || len(api.keyChanges) != 1 || api.stops != 1 || api.refused != 0 {
+			t.Fatalf("starts = %d, keyChanges = %v, stops = %d, refused = %d", api.starts, api.keyChanges, api.stops, api.refused)
+		}
+		if got := getModel(t, resp.State).ObservedState.ValueString(); got != "stopped" {
+			t.Fatalf("observed_state = %q: the instance must end where the configuration asks", got)
+		}
+	})
+
+	t.Run("a refused change keeps the old key in state", func(t *testing.T) {
+		api := seeded(instanceWith("running", "individual"))
+		api.keyErr = &client.APIError{Status: 422, Code: "VALIDATION_FAILED",
+			Errors: []client.FieldError{{Field: "ssh_key_id", Code: "SSH_KEY_NOT_FOUND", Message: "must identify an SSH key on this account"}}}
+		resp := updateWith(t, api, "running", map[string]tftypes.Value{"ssh_key_id": str("sshk_gone")})
+
+		if !strings.Contains(errorText(resp.Diagnostics), "Error changing the SSH key") {
+			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
+		}
+		if got := getModel(t, resp.State).SSHKeyID.ValueString(); got != "sshk_1" {
+			t.Fatalf("state ssh_key_id = %q: state must keep the key the instance still has", got)
+		}
+	})
+
+	t.Run("after an import no key is sent", func(t *testing.T) {
+		api := seeded(instanceWith("running", "individual"))
+		resp := updateFrom(t, api, "running", map[string]tftypes.Value{"ssh_key_id": tftypes.NewValue(tftypes.String, nil)},
+			map[string]tftypes.Value{"ssh_key_id": str("sshk_1")})
+		if resp.Diagnostics.HasError() {
+			t.Fatal(errorText(resp.Diagnostics))
+		}
+		if len(api.keyChanges) != 0 {
+			t.Fatalf("keyChanges = %v: adopting an imported instance must not restart it", api.keyChanges)
+		}
+	})
+}
+
 func TestSecurityGroupChangeInPlace(t *testing.T) {
 	group := map[string]tftypes.Value{"security_group_id": str("sg_new")}
 
