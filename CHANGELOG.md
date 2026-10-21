@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+FEATURES:
+
+- `pantechdynamics_instance`: **`ssh_key_id` now changes in place** instead of replacing the instance (`POST /instances/{id}/change-ssh-key`). The instance restarts to take the new key, about two minutes of downtime; afterwards only the new key logs in, and keys added on the server by hand keep working. A stopped instance is started for the change and returned to its configured `power_state`. After an import, or when `ssh_key_id` is removed from the configuration, nothing is sent.
+
 ## 0.4.0 (2026-10-20)
 
 FEATURES:

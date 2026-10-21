@@ -16,14 +16,15 @@ import (
 type fakeAPI struct {
 	instances []client.Instance
 
-	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr, attachErr error
-	createLands, opStuck, deleteHard                                                                                               bool
+	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr, attachErr, keyErr error
+	createLands, opStuck, deleteHard                                                                                                       bool
 
 	nextID      int
 	creates     int
 	renames     int
 	starts      int
 	resizes     int
+	keyChanges  []string // ssh key ids sent, in order
 	groupSwaps  int
 	refused     int // changes sent to an instance in the wrong state, which the platform rejects with 409
 	stops       int
@@ -204,6 +205,21 @@ func (f *fakeAPI) ResizeInstance(_ context.Context, id, planSlug string) (*clien
 		f.instances[i].PlanSlug = planSlug
 	}
 	return &client.OperationReference{OperationID: "op_resize", ResourceID: id}, nil
+}
+
+// ChangeInstanceSSHKey behaves like the real backend: the instance must be running.
+func (f *fakeAPI) ChangeInstanceSSHKey(_ context.Context, id, sshKeyID string) (*client.OperationReference, error) {
+	f.keyChanges = append(f.keyChanges, sshKeyID)
+	if f.keyErr != nil {
+		return nil, f.keyErr
+	}
+	for i := range f.instances {
+		if f.instances[i].ID == id && f.instances[i].ObservedState != client.InstanceRunning {
+			f.refused++
+			return nil, &client.APIError{Status: 409, Code: client.CodeInvalidResourceState}
+		}
+	}
+	return &client.OperationReference{OperationID: "op_change_ssh_key", ResourceID: id}, nil
 }
 
 // ChangeInstanceSecurityGroup behaves like the real backend: the instance must be stopped.
