@@ -4,7 +4,12 @@
 
 FEATURES:
 
+- `pantechdynamics_kubernetes_cluster`: **`endpoint_access` is now sent with the create**, so a public or dual cluster is created that way rather than changed after it runs. New read-only `public_ip` and `public_port`, where a public or dual API server is reached (null for a private cluster, and until it has an address). Public and dual hold a public address billed as a VPC public IP.
 - `pantechdynamics_instance`: **`ssh_key_id` now changes in place** instead of replacing the instance (`POST /instances/{id}/change-ssh-key`). The instance restarts to take the new key, about two minutes of downtime; afterwards only the new key logs in, and keys added on the server by hand keep working. A stopped instance is started for the change and returned to its configured `power_state`. After an import, or when `ssh_key_id` is removed from the configuration, nothing is sent.
+
+BREAKING CHANGES:
+
+- `pantechdynamics_kubernetes_cluster`: a new cluster with no `endpoint_access` is now **private** (the API's default). It was public before. Existing clusters keep the value in their state, so nothing changes for them on the next apply. Set `endpoint_access = "public"` to create a public one.
 
 ## 0.4.0 (2026-10-20)
 
