@@ -62,6 +62,7 @@ var (
 	_ resource.ResourceWithConfigure      = &Resource{}
 	_ resource.ResourceWithImportState    = &Resource{}
 	_ resource.ResourceWithValidateConfig = &Resource{}
+	_ resource.ResourceWithModifyPlan     = &Resource{}
 )
 
 // Resource manages one instance.
@@ -115,7 +116,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"ssh_key_id": schema.StringAttribute{
-				Description: "Id of the SSH key to install, from pantechdynamics_ssh_key. Changing it gives the instance the new key in place: it is restarted, about two minutes of downtime, and afterwards only the new key logs in (keys added on the server by hand keep working). A stopped instance is started for the change. The API does not report which key an instance holds, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Removing it changes nothing on the instance.",
+				Description: "Id of the SSH key to install, from pantechdynamics_ssh_key. Required to create an instance: images have no password login, so a plan without it fails. Changing it gives the instance the new key in place: it is restarted, about two minutes of downtime, and afterwards only the new key logs in (keys added on the server by hand keep working). A stopped instance is started for the change. The API does not report which key an instance holds, so Terraform cannot detect a change made outside it, and after an import it holds no value and is not compared. Removing it changes nothing on the instance.",
 				Optional:    true,
 			},
 			"region": schema.StringAttribute{

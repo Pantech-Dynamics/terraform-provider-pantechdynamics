@@ -4,14 +4,18 @@
 
 FEATURES:
 
-
+- **New resource:** `pantechdynamics_webhook`, an https URL Pantech sends your organization's events to as signed JSON POSTs. `url` and `events` (an ordered list of event types, `<resource>.*` or `*`, each listed once) are required; `description` (default `""`) and `enabled` (default `true`) are optional. Every argument changes in place, and only the changed ones are sent. The signing secret is returned once, at create, and kept in state as the sensitive `secret`; it is null after an import, and rotating it is done in the console or the CLI, not by Terraform. Read-only `disabled_reason`, `failing_since`, `created_at` and `updated_at`. A webhook the platform disabled after three days of failed deliveries is enabled again by the next apply with `enabled = true`. Import by id (`whk_...`). At most 10 per organization, managed only with an owner's or admin's API key.
+- **New data source:** `pantechdynamics_webhook_event_types`, every event type a webhook can subscribe to (`type`, `resource`, `description`).
 - `pantechdynamics_instance`: **`encrypted` can now be set.** `true` creates the encrypted version of `image_slug` (refused with `ENCRYPTION_NOT_SUPPORTED` when the image has none available to you); naming an encrypted image directly still works too. The configured `image_slug` is kept even though the instance reports its encrypted variant's slug, so the next plan does not replace it. Changing `encrypted` replaces the instance. New read-only `deletion_protection`, also on the `pantechdynamics_instance` data source.
-
 - `pantechdynamics_instance`: **`ssh_key_id` now changes in place** instead of replacing the instance (`POST /instances/{id}/change-ssh-key`). The instance restarts to take the new key, about two minutes of downtime; afterwards only the new key logs in, and keys added on the server by hand keep working. A stopped instance is started for the change and returned to its configured `power_state`. After an import, or when `ssh_key_id` is removed from the configuration, nothing is sent.
 
 BREAKING CHANGES:
 
 - `pantechdynamics_kubernetes_cluster`: a new cluster with no `endpoint_access` is now **private** (the API's default). It was public before. Existing clusters keep the value in their state, so nothing changes for them on the next apply. Set `endpoint_access = "public"` to create a public one.
+
+BUG FIXES:
+
+- `pantechdynamics_instance`: a create without `ssh_key_id` now fails at plan time with "ssh_key_id is required to create an instance", instead of reaching the API and failing there (it was answered `500 INTERNAL`; the API now answers `422` with `ssh_key_id` `REQUIRED`). Images have no password login, so a key is how you log in. Imported instances, which hold no `ssh_key_id`, are not affected.
 
 ## 0.4.0 (2026-10-20)
 

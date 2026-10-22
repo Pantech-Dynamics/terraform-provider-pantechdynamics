@@ -87,6 +87,7 @@ func TestAPIErrorIs(t *testing.T) {
 		{"deleted database snapshot", &APIError{Status: 404, Code: "DATABASE_SNAPSHOT_NOT_FOUND"}, true, false},
 		{"unknown database order", &APIError{Status: 404, Code: "DATABASE_ORDER_NOT_FOUND"}, true, false},
 		{"unknown receipt", &APIError{Status: 404, Code: "RECEIPT_NOT_FOUND"}, true, false},
+		{"deleted webhook", &APIError{Status: 404, Code: "WEBHOOK_NOT_FOUND"}, true, false},
 		{"feature not offered is not a missing resource", &APIError{Status: 404, Code: "NOT_FOUND"}, false, false},
 		{"field code at top level is not matched", &APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []FieldError{{Field: "plan_slug", Code: "PLAN_NOT_FOUND"}}}, false, false},
 		{"unauthenticated", &APIError{Status: 401, Code: "UNAUTHENTICATED"}, false, false},

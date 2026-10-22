@@ -15,6 +15,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/lookups"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/webhookeventtypes"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/database"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
@@ -32,6 +33,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/subnet"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/volume"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/webhook"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -202,6 +204,7 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		sshkey.New,
 		subnet.New,
 		volume.New,
+		webhook.New,
 	}
 }
 
@@ -223,6 +226,7 @@ func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() dataso
 		plans.NewSingle,
 		regions.New,
 		regions.NewSingle,
+		webhookeventtypes.New,
 	}
 }
 

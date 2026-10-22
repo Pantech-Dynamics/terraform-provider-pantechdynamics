@@ -87,3 +87,22 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 			"An instance in a subnet is protected by the subnet's firewall rules, not a security group. Remove security_group_id, or remove subnet_id for a standard instance.")
 	}
 }
+
+// ModifyPlan requires ssh_key_id when an instance is created. Images have no
+// password login, so the platform refuses a create without a key; catching
+// it at plan time keeps an order from ever being attempted. It applies to
+// creates only: an imported instance holds no ssh_key_id and stays valid.
+func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if !req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var key types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("ssh_key_id"), &key)...)
+	if resp.Diagnostics.HasError() || key.IsUnknown() {
+		return
+	}
+	if key.IsNull() || strings.TrimSpace(key.ValueString()) == "" {
+		resp.Diagnostics.AddAttributeError(path.Root("ssh_key_id"), "ssh_key_id is required to create an instance",
+			"Images have no password login, so a new instance needs an SSH key to log in with. Set ssh_key_id to the id of a pantechdynamics_ssh_key (or one from pantechdynamics_ssh_key data source).")
+	}
+}

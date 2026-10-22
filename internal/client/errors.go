@@ -48,6 +48,7 @@ var notFoundCodes = map[string]bool{
 	"DATABASE_SNAPSHOT_NOT_FOUND": true,
 	"DATABASE_ORDER_NOT_FOUND":    true,
 	"RECEIPT_NOT_FOUND":           true,
+	CodeWebhookNotFound:           true,
 }
 
 // FieldError is one entry of a 422 validation failure.
