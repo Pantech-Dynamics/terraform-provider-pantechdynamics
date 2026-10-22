@@ -142,8 +142,12 @@ type KubernetesCluster struct {
 	PodCIDR             string                `json:"pod_cidr"`
 	ServiceCIDR         string                `json:"service_cidr"`
 	EndpointAccess      string                `json:"endpoint_access"`
-	CreatedAt           *time.Time            `json:"created_at"`
-	UpdatedAt           *time.Time            `json:"updated_at"`
+	// PublicIP and PublicPort are where a public or dual API server is
+	// reached; nil until the cluster has a public address, and for private.
+	PublicIP   *string    `json:"public_ip"`
+	PublicPort *int64     `json:"public_port"`
+	CreatedAt  *time.Time `json:"created_at"`
+	UpdatedAt  *time.Time `json:"updated_at"`
 }
 
 // CreateKubernetesClusterRequest creates a cluster. SubnetID is required in a
@@ -152,7 +156,8 @@ type KubernetesCluster struct {
 // which the backend allows only with autoscaling enabled (it then starts at
 // MinWorkers). APIAllowedCIDRs is VPC zone only; empty is omitted (any address).
 // Empty CNIPlugin, PodCIDR and ServiceCIDR are omitted, so the backend applies
-// flannel, 10.42.0.0/16 and 10.43.0.0/16.
+// flannel, 10.42.0.0/16 and 10.43.0.0/16. An empty EndpointAccess is omitted,
+// so the backend creates the cluster private.
 type CreateKubernetesClusterRequest struct {
 	Name                string                 `json:"name"`
 	ZoneID              string                 `json:"zone_id"`
@@ -166,6 +171,7 @@ type CreateKubernetesClusterRequest struct {
 	CNIPlugin           string                 `json:"cni_plugin,omitempty"`
 	PodCIDR             string                 `json:"pod_cidr,omitempty"`
 	ServiceCIDR         string                 `json:"service_cidr,omitempty"`
+	EndpointAccess      string                 `json:"endpoint_access,omitempty"`
 }
 
 // UpdateKubernetesClusterRequest is the PATCH body: a nil field is left out and

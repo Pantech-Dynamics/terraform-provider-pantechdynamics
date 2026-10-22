@@ -91,6 +91,11 @@ func (f *fakeAPI) CreateKubernetesCluster(_ context.Context, req client.CreateKu
 	if req.Autoscaling != nil {
 		k.Autoscaling = *req.Autoscaling
 	}
+	// As the API does: private unless public or dual is asked for.
+	k.EndpointAccess = "private"
+	if req.EndpointAccess != "" {
+		k.EndpointAccess = req.EndpointAccess
+	}
 	if req.APIAllowedCIDRs != nil {
 		k.APIAllowedCIDRs = slices.Sorted(slices.Values(req.APIAllowedCIDRs))
 	}
