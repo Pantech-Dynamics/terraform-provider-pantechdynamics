@@ -55,8 +55,9 @@ resource "pantechdynamics_kubernetes_cluster" "prod" {
   # pod_cidr     = "10.42.0.0/16"
   # service_cidr = "10.43.0.0/16"
 
-  # Where the API server can be reached from: public (default), private (only
-  # inside the cluster's network) or dual. Changes in place.
+  # Where the API server can be reached from: private (the default, only
+  # inside the cluster's network), public or dual. public and dual hold a
+  # public address billed as a VPC public IP. Changes in place.
   endpoint_access = "public"
 
   # The autoscaler adds and removes workers between min_workers and max_workers

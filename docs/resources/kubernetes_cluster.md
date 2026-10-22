@@ -70,8 +70,9 @@ resource "pantechdynamics_kubernetes_cluster" "prod" {
   # pod_cidr     = "10.42.0.0/16"
   # service_cidr = "10.43.0.0/16"
 
-  # Where the API server can be reached from: public (default), private (only
-  # inside the cluster's network) or dual. Changes in place.
+  # Where the API server can be reached from: private (the default, only
+  # inside the cluster's network), public or dual. public and dual hold a
+  # public address billed as a VPC public IP. Changes in place.
   endpoint_access = "public"
 
   # The autoscaler adds and removes workers between min_workers and max_workers
@@ -149,7 +150,7 @@ output "kubeconfig" {
 - `autoscaling` (Attributes) The cluster autoscaler, which adds and removes workers between min_workers and max_workers as pods need them. Workers are billed as VMs of node_plan while they run, and your credit and account limits are checked for max_workers. The cluster starts at min_workers. Changes in place. Removing it (or setting enabled = false) turns the autoscaler off and needs workers set: the count it lands on. (see [below for nested schema](#nestedatt--autoscaling))
 - `cni_plugin` (String) The pod network plugin: "flannel" (the default), "wireguard" (flannel with traffic between nodes encrypted) or "calico" (network policies). Changes in place by rebuilding the pod network; pods restart.
 - `control_nodes` (Number) Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.
-- `endpoint_access` (String) Where the API server can be reached from: "public" (the default, from the internet, limited by api_allowed_cidrs), "private" (only from inside the cluster's network) or "dual" (both). Set at create once the cluster runs, and changes in place.
+- `endpoint_access` (String) Where the API server can be reached from: "private" (the default, only from inside the cluster's network), "public" (from the internet, limited by api_allowed_cidrs) or "dual" (both). public and dual give the API server a public address of its own (public_ip, public_port), billed as a VPC public IP for every hour it is held. Changes in place.
 - `pod_cidr` (String) The pods' IPv4 address range. Defaults to "10.42.0.0/16". Change it only when it overlaps a network the pods must reach. Changes in place by rebuilding the pod network; pods restart.
 - `service_cidr` (String) The services' IPv4 address range. Defaults to "10.43.0.0/16". Changes in place by rebuilding the pod network; pods restart.
 - `subnet_id` (String) Id of the subnet the nodes go in, from pantechdynamics_subnet. Required in a VPC zone, and must be omitted in a standard zone. Changing it replaces the cluster.
@@ -171,6 +172,8 @@ output "kubeconfig" {
 - `node_plan_id` (String) Id of the plan every node uses.
 - `nodes` (Number) control_nodes plus workers: the number of VMs billed.
 - `observed_state` (String) State of the cluster as the platform sees it, for example "running", "updating" while a scale or upgrade runs, or "stopped".
+- `public_ip` (String) The public address the API server is reached on when endpoint_access is public or dual; null until it has one, and for private.
+- `public_port` (Number) The public port the API server is reached on when endpoint_access is public or dual; null until it has one, and for private.
 - `updated_at` (String) When the cluster was last changed, in RFC 3339 UTC, to the second.
 - `volume_storage_gb` (Number) Storage, in GB, that the workloads' persistent volume claims use. It is billed with the nodes' disks, and changes as workloads create and delete volumes.
 
