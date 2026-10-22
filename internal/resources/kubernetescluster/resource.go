@@ -641,7 +641,7 @@ func addAPIError(diags *diag.Diagnostics, summary string, err error, hints map[s
 	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 && allMapped(apiErr.Errors) {
 		for _, fe := range apiErr.Errors {
 			p, _ := attributeFor(fe.Field)
-			detail := fe.Message + " (" + fe.Code + ")"
+			detail := apiErr.FieldDetail(fe)
 			if hint := fieldHints[fe.Code]; hint != "" {
 				detail += "\n\n" + hint
 			}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-10-22)
+
+BUG FIXES:
+
+- Errors on a specific attribute now include the API's `request_id`, to quote to support. On `pantechdynamics_instance`, errors about `subnet_id`, `network_id` and `encrypted` now point at that attribute instead of appearing as one general error.
+
 ## 0.5.0 (2026-10-22)
 
 FEATURES:

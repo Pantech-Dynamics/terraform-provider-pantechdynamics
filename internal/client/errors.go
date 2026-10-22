@@ -59,6 +59,16 @@ type FieldError struct {
 }
 
 // APIError is an application/problem+json error returned by the backend.
+// FieldDetail is one field error as an attribute diagnostic's detail: the
+// message, its code, and the request id to quote to support.
+func (e *APIError) FieldDetail(fe FieldError) string {
+	detail := fe.Message + " (" + fe.Code + ")"
+	if e.RequestID != "" {
+		detail += "\n\nrequest_id: " + e.RequestID
+	}
+	return detail
+}
+
 type APIError struct {
 	Status    int
 	Code      string

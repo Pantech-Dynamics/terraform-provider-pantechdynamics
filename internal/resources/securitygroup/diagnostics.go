@@ -35,7 +35,7 @@ func addAPIError(diags *diag.Diagnostics, summary string, err error) {
 	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 && allMapped(apiErr.Errors) {
 		for _, fe := range apiErr.Errors {
 			p, _ := attributeFor(fe.Field)
-			diags.AddAttributeError(p, summary, fe.Message+" ("+fe.Code+")")
+			diags.AddAttributeError(p, summary, apiErr.FieldDetail(fe))
 		}
 		return
 	}

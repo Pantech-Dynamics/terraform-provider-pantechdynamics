@@ -22,7 +22,7 @@ func addAPIError(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 && allSettable(apiErr.Errors) {
 		for _, fe := range apiErr.Errors {
-			diags.AddAttributeError(path.Root(fe.Field), summary, fe.Message+" ("+fe.Code+")")
+			diags.AddAttributeError(path.Root(fe.Field), summary, apiErr.FieldDetail(fe))
 		}
 		return
 	}

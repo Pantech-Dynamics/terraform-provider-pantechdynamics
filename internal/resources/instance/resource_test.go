@@ -222,12 +222,28 @@ func TestCreate(t *testing.T) {
 	t.Run("a field the schema lacks becomes a general error", func(t *testing.T) {
 		api := seeded()
 		api.createErr = &client.APIError{Status: 422, Code: "VALIDATION_FAILED",
-			Errors: []client.FieldError{{Field: "subnet_id", Code: "SUBNET_NOT_FOUND", Message: "not found"}}}
+			Errors: []client.FieldError{{Field: "placement", Code: "INVALID_PLACEMENT", Message: "not found"}}}
 
 		errs := create(api, "web", withKey).Diagnostics.Errors()
 
 		if _, attached := errs[0].(diag.DiagnosticWithPath); attached {
 			t.Fatal("a diagnostic on a path the schema does not have would be rejected by Terraform")
+		}
+	})
+
+	t.Run("a subnet error points at subnet_id and keeps the request id", func(t *testing.T) {
+		api := seeded()
+		api.createErr = &client.APIError{Status: 422, Code: "VALIDATION_FAILED", RequestID: "req_42",
+			Errors: []client.FieldError{{Field: "subnet_id", Code: "SUBNET_NOT_FOUND", Message: "must be a subnet in your account"}}}
+
+		errs := create(api, "web", withKey).Diagnostics.Errors()
+
+		withPath, attached := errs[0].(diag.DiagnosticWithPath)
+		if !attached || withPath.Path().String() != "subnet_id" {
+			t.Fatalf("diagnostic %v is not on subnet_id", errs[0])
+		}
+		if !strings.Contains(errs[0].Detail(), "req_42") || !strings.Contains(errs[0].Detail(), "SUBNET_NOT_FOUND") {
+			t.Fatalf("detail = %q", errs[0].Detail())
 		}
 	})
 
