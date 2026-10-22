@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ type instanceAPI interface {
 	CreateInstance(ctx context.Context, req client.CreateInstanceRequest) (*client.InstanceOrderReference, error)
 	GetInstance(ctx context.Context, id string) (*client.Instance, error)
 	ListInstances(ctx context.Context) ([]client.Instance, error)
+	ListImages(ctx context.Context) ([]client.Image, error)
 	RenameInstance(ctx context.Context, id, name string) (*client.OperationReference, error)
 	StartInstance(ctx context.Context, id string) (*client.OperationReference, error)
 	StopInstance(ctx context.Context, id string) (*client.OperationReference, error)
@@ -102,7 +104,13 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"encrypted": schema.BoolAttribute{
-				Description:   "Whether the instance was made from an encrypted image (encrypted = true in pantechdynamics_images): its disk, snapshots and backups are encrypted at rest, with a key of its own.",
+				Description:   "Whether the instance's disk, snapshots and backups are encrypted at rest, with a key of its own. Set true to create the encrypted version of image_slug (refused with ENCRYPTION_NOT_SUPPORTED when the image has none available to you), or name an encrypted image (encrypted = true in pantechdynamics_images) directly. An encrypted instance needs outbound access to Pantech's key servers at every boot. Left out, the image decides. Changing it replaces the instance.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown(), boolplanmodifier.RequiresReplace()},
+			},
+			"deletion_protection": schema.BoolAttribute{
+				Description:   "Whether deletion of the instance is refused. It is set by Pantech support, not through Terraform; while it is true, destroying the instance fails.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
@@ -314,9 +322,34 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
+	r.keepConfiguredImage(ctx, state, inst)
 	next, diags := fromAPIResponse(ctx, state, inst)
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, next)...)
+}
+
+// keepConfiguredImage keeps the image_slug the configuration names when the
+// instance reports that image's encrypted variant: encrypted = true on a
+// plain image creates the instance from the variant, which has a slug of its
+// own, and reading that slug back would replace the instance on every plan.
+// Any other difference is left as drift. A catalogue that cannot be read
+// leaves the reported slug too.
+func (r *Resource) keepConfiguredImage(ctx context.Context, prev model, inst *client.Instance) {
+	configured := prev.ImageSlug.ValueString()
+	if !inst.Encrypted || prev.ImageSlug.IsNull() || prev.ImageSlug.IsUnknown() || configured == "" || inst.ImageSlug == configured {
+		return
+	}
+	images, err := r.api.ListImages(ctx)
+	if err != nil {
+		tflog.Warn(ctx, "could not read the image catalogue to compare image_slug", map[string]any{"error": err.Error()})
+		return
+	}
+	for _, img := range images {
+		if img.Slug == inst.ImageSlug && img.EncryptedVariantOf != nil && *img.EncryptedVariantOf == configured {
+			inst.ImageSlug = configured
+			return
+		}
+	}
 }
 
 // Update applies the in-place changes: private network, rename, security group,
@@ -490,6 +523,7 @@ func (r *Resource) refresh(ctx context.Context, prev model, id string, state int
 		addAPIError(diags, "Error reading instance after the change", err)
 		return
 	}
+	r.keepConfiguredImage(ctx, prev, inst)
 	next, d := fromAPIResponse(ctx, prev, inst)
 	diags.Append(d...)
 	diags.Append(state.Set(ctx, next)...)

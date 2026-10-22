@@ -35,8 +35,9 @@ output "app_private_address" {
 ### Read-Only
 
 - `created_at` (String) When the instance was created, in RFC 3339 UTC, to the second.
+- `deletion_protection` (Boolean) Whether deletion of the instance is refused (set by Pantech support).
 - `desired_state` (String) "running" or "stopped", as last requested.
-- `encrypted` (Boolean) Whether the instance was made from an encrypted image, so its disk is encrypted at rest.
+- `encrypted` (Boolean) Whether the instance's disk is encrypted at rest.
 - `image_slug` (String) Image the instance was created from.
 - `network_id` (String) VPC network of the instance, or null for a standard instance.
 - `observed_state` (String) State of the instance as the platform sees it, for example "running".

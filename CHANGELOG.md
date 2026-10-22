@@ -4,7 +4,9 @@
 
 FEATURES:
 
-- `pantechdynamics_kubernetes_cluster`: **`endpoint_access` is now sent with the create**, so a public or dual cluster is created that way rather than changed after it runs. New read-only `public_ip` and `public_port`, where a public or dual API server is reached (null for a private cluster, and until it has an address). Public and dual hold a public address billed as a VPC public IP.
+
+- `pantechdynamics_instance`: **`encrypted` can now be set.** `true` creates the encrypted version of `image_slug` (refused with `ENCRYPTION_NOT_SUPPORTED` when the image has none available to you); naming an encrypted image directly still works too. The configured `image_slug` is kept even though the instance reports its encrypted variant's slug, so the next plan does not replace it. Changing `encrypted` replaces the instance. New read-only `deletion_protection`, also on the `pantechdynamics_instance` data source.
+
 - `pantechdynamics_instance`: **`ssh_key_id` now changes in place** instead of replacing the instance (`POST /instances/{id}/change-ssh-key`). The instance restarts to take the new key, about two minutes of downtime; afterwards only the new key logs in, and keys added on the server by hand keep working. A stopped instance is started for the change and returned to its configured `power_state`. After an import, or when `ssh_key_id` is removed from the configuration, nothing is sent.
 
 BREAKING CHANGES:
