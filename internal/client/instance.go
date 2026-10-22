@@ -88,14 +88,16 @@ type Instance struct {
 	ImageSlug string `json:"image_slug"`
 	// Encrypted is true for an instance made from an encrypted image. An
 	// older API does not send it, which reads as false.
-	Encrypted       bool    `json:"encrypted"`
-	Region          string  `json:"region"`
-	Zone            string  `json:"zone"`
-	NetworkID       *string `json:"network_id"`
-	SubnetID        *string `json:"subnet_id"`
-	SecurityGroupID string  `json:"security_group_id"`
-	PublicIPv4      *string `json:"public_ipv4"`
-	PrivateIPv4     *string `json:"private_ipv4"`
+	Encrypted bool `json:"encrypted"`
+	// DeletionProtection refuses the instance's deletion while true.
+	DeletionProtection bool    `json:"deletion_protection"`
+	Region             string  `json:"region"`
+	Zone               string  `json:"zone"`
+	NetworkID          *string `json:"network_id"`
+	SubnetID           *string `json:"subnet_id"`
+	SecurityGroupID    string  `json:"security_group_id"`
+	PublicIPv4         *string `json:"public_ipv4"`
+	PrivateIPv4        *string `json:"private_ipv4"`
 	// PrivateNetworkState is the interface on the zone's private database
 	// network: none, attaching, attached or detaching. PrivateNetworkIP is its
 	// address once attached, kept while it is being removed.
@@ -122,6 +124,9 @@ type CreateInstanceRequest struct {
 	SubnetID        string            `json:"subnet_id,omitempty"`
 	NetworkID       string            `json:"network_id,omitempty"`
 	Tags            map[string]string `json:"tags,omitempty"`
+	// Encrypted, when not nil, asks for image_slug's encrypted version (true)
+	// or the image as named (false). Nil leaves it to the image.
+	Encrypted *bool `json:"encrypted,omitempty"`
 }
 
 // renameRequest changes an instance's name.

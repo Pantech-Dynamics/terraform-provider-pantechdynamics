@@ -15,6 +15,8 @@ import (
 // its own, so a wait only succeeds when its done check passes.
 type fakeAPI struct {
 	instances []client.Instance
+	images    []client.Image
+	imagesErr error
 
 	createErr, listErr, getErr, renameErr, deleteErr, orderErr, opErr, untilErr, startErr, stopErr, resizeErr, groupErr, attachErr, keyErr error
 	createLands, opStuck, deleteHard                                                                                                       bool
@@ -68,6 +70,15 @@ func (f *fakeAPI) CreateInstance(_ context.Context, req client.CreateInstanceReq
 	id := fmt.Sprintf("vm_%d", f.nextID)
 	inst := running(id, req.Name)
 	inst.PlanSlug, inst.ImageSlug = req.PlanSlug, req.ImageSlug
+	// As the API does: encrypted on a plain image creates its encrypted
+	// variant, which the instance then reports by its own slug.
+	if req.Encrypted != nil && *req.Encrypted {
+		for _, img := range f.images {
+			if img.EncryptedVariantOf != nil && *img.EncryptedVariantOf == req.ImageSlug {
+				inst.ImageSlug, inst.Encrypted = img.Slug, true
+			}
+		}
+	}
 	inst.Tags = req.Tags
 	if inst.Tags == nil {
 		inst.Tags = map[string]string{}
@@ -316,4 +327,11 @@ func (f *fakeAPI) DetachInstancePrivateNetwork(_ context.Context, id string) (*c
 		}
 	}
 	return &client.OperationReference{OperationID: "op_detach", ResourceID: id}, nil
+}
+
+func (f *fakeAPI) ListImages(context.Context) ([]client.Image, error) {
+	if f.imagesErr != nil {
+		return nil, f.imagesErr
+	}
+	return f.images, nil
 }

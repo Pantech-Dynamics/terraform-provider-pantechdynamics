@@ -45,6 +45,12 @@ resource "pantechdynamics_instance" "web" {
 
   image_slug = "ubuntu-24-04"
 
+  # Optional: true creates the encrypted version of the image, so the disk,
+  # snapshots and backups are encrypted at rest with a key of its own. The
+  # instance needs outbound access to Pantech's key servers at every boot.
+  # Changing it replaces the instance.
+  # encrypted = true
+
   ssh_key_id = pantechdynamics_ssh_key.admin.id
 
   # Changing the security group updates the instance in place. The platform only
@@ -143,6 +149,7 @@ output "app_private_network_ip" {
 ### Optional
 
 - `desired_state` (String) Whether the instance should be "running" or "stopped". Defaults to "running". Changing it starts or stops the instance in place. A stopped instance is billed for storage only. The provider never asks for a state the instance is already in, because the API fails that operation and leaves the instance failed.
+- `encrypted` (Boolean) Whether the instance's disk, snapshots and backups are encrypted at rest, with a key of its own. Set true to create the encrypted version of image_slug (refused with ENCRYPTION_NOT_SUPPORTED when the image has none available to you), or name an encrypted image (encrypted = true in pantechdynamics_images) directly. An encrypted instance needs outbound access to Pantech's key servers at every boot. Left out, the image decides. Changing it replaces the instance.
 - `network_id` (String) Id of the VPC network the instance is in. It follows from subnet_id, so it is normally left unset. Changing it replaces the instance.
 - `private_network` (Boolean) Whether the instance has a second network interface on its zone's private database network, so it can reach managed databases by their private address. Standard instances only (no subnet_id), in a zone that has the network. Changing it attaches or detaches the interface in place, without a restart, on a running or stopped instance. Omit it to leave the interface as it is. The instance's security group must let in nothing from the private network's range (private_network_cidr of the zone's standard placement in pantechdynamics_region, 10.250.0.0/20 in af-abj-1 today), including through 0.0.0.0/0 or ICMP rules, because a group applies to every interface: the API refuses the attach with SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK and names the rules to narrow, and while attached it refuses rule changes and group changes that would let the range in. Inside the guest the interface stays down until configured: on Ubuntu add it to netplan with dhcp4: true and dhcp4-overrides {use-routes: false, use-dns: false}, then netplan apply.
 - `region` (String) Region to create the instance in, for example af-abj. Defaults to the platform's default region. Changing it replaces the instance.
@@ -155,7 +162,7 @@ output "app_private_network_ip" {
 ### Read-Only
 
 - `created_at` (String) When the instance was created, in RFC 3339 UTC, to the second.
-- `encrypted` (Boolean) Whether the instance was made from an encrypted image (encrypted = true in pantechdynamics_images): its disk, snapshots and backups are encrypted at rest, with a key of its own.
+- `deletion_protection` (Boolean) Whether deletion of the instance is refused. It is set by Pantech support, not through Terraform; while it is true, destroying the instance fails.
 - `id` (String) Identifier of the instance, starting with vm_.
 - `observed_state` (String) State of the instance as the platform sees it, for example "running".
 - `private_ipv4` (String) IPv4 address of the instance on its network.

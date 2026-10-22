@@ -19,6 +19,7 @@ type model struct {
 	PlanSlug        types.String   `tfsdk:"plan_slug"`
 	ImageSlug       types.String   `tfsdk:"image_slug"`
 	Encrypted       types.Bool     `tfsdk:"encrypted"`
+	DeletionProtect types.Bool     `tfsdk:"deletion_protection"`
 	SSHKeyID        types.String   `tfsdk:"ssh_key_id"`
 	Region          types.String   `tfsdk:"region"`
 	SecurityGroupID types.String   `tfsdk:"security_group_id"`
@@ -49,6 +50,10 @@ func toCreateRequest(ctx context.Context, m model) (client.CreateInstanceRequest
 		SecurityGroupID: knownString(m.SecurityGroupID),
 		SubnetID:        knownString(m.SubnetID),
 		NetworkID:       knownString(m.NetworkID),
+	}
+	if !m.Encrypted.IsNull() && !m.Encrypted.IsUnknown() {
+		encrypted := m.Encrypted.ValueBool()
+		req.Encrypted = &encrypted
 	}
 
 	var diags diag.Diagnostics
@@ -87,6 +92,7 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		PlanSlug:        types.StringValue(inst.PlanSlug),
 		ImageSlug:       types.StringValue(inst.ImageSlug),
 		Encrypted:       types.BoolValue(inst.Encrypted),
+		DeletionProtect: types.BoolValue(inst.DeletionProtection),
 		SSHKeyID:        sshKey,
 		Region:          types.StringValue(inst.Region),
 		SecurityGroupID: types.StringValue(inst.SecurityGroupID),
@@ -119,7 +125,8 @@ func pendingModel(plan model, id string) model {
 		Name:            plan.Name,
 		PlanSlug:        plan.PlanSlug,
 		ImageSlug:       plan.ImageSlug,
-		Encrypted:       types.BoolNull(),
+		Encrypted:       nullIfUnknownBool(plan.Encrypted),
+		DeletionProtect: types.BoolNull(),
 		SSHKeyID:        nullIfUnknown(plan.SSHKeyID),
 		Region:          nullIfUnknown(plan.Region),
 		SecurityGroupID: nullIfUnknown(plan.SecurityGroupID),
@@ -162,4 +169,12 @@ func timestampValue(t *time.Time) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(t.UTC().Format(time.RFC3339))
+}
+
+// nullIfUnknownBool is nullIfUnknown for a bool.
+func nullIfUnknownBool(v types.Bool) types.Bool {
+	if v.IsUnknown() {
+		return types.BoolNull()
+	}
+	return v
 }

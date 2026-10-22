@@ -30,6 +30,12 @@ resource "pantechdynamics_instance" "web" {
 
   image_slug = "ubuntu-24-04"
 
+  # Optional: true creates the encrypted version of the image, so the disk,
+  # snapshots and backups are encrypted at rest with a key of its own. The
+  # instance needs outbound access to Pantech's key servers at every boot.
+  # Changing it replaces the instance.
+  # encrypted = true
+
   ssh_key_id = pantechdynamics_ssh_key.admin.id
 
   # Changing the security group updates the instance in place. The platform only
