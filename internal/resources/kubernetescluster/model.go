@@ -40,6 +40,8 @@ type model struct {
 	PodCIDR             types.String   `tfsdk:"pod_cidr"`
 	ServiceCIDR         types.String   `tfsdk:"service_cidr"`
 	EndpointAccess      types.String   `tfsdk:"endpoint_access"`
+	PublicIP            types.String   `tfsdk:"public_ip"`
+	PublicPort          types.Int64    `tfsdk:"public_port"`
 	KubeConfig          types.String   `tfsdk:"kube_config"`
 	CreatedAt           types.String   `tfsdk:"created_at"`
 	UpdatedAt           types.String   `tfsdk:"updated_at"`
@@ -92,6 +94,7 @@ func toCreateRequest(ctx context.Context, plan model) (client.CreateKubernetesCl
 		CNIPlugin:           knownString(plan.CNIPlugin),
 		PodCIDR:             knownString(plan.PodCIDR),
 		ServiceCIDR:         knownString(plan.ServiceCIDR),
+		EndpointAccess:      knownString(plan.EndpointAccess),
 	}
 	if auto.Enabled {
 		req.Autoscaling = &auto
@@ -275,6 +278,8 @@ func fromAPIResponse(ctx context.Context, prev model, k *client.KubernetesCluste
 		PodCIDR:             types.StringValue(k.PodCIDR),
 		ServiceCIDR:         types.StringValue(k.ServiceCIDR),
 		EndpointAccess:      types.StringValue(k.EndpointAccess),
+		PublicIP:            resourcekit.OptionalString(k.PublicIP),
+		PublicPort:          resourcekit.OptionalInt64(k.PublicPort),
 		KubeConfig:          nullIfUnknown(prev.KubeConfig),
 		CreatedAt:           resourcekit.Timestamp(k.CreatedAt),
 		UpdatedAt:           resourcekit.Timestamp(k.UpdatedAt),
@@ -304,6 +309,8 @@ func pendingModel(plan model, id string) model {
 	m.CreatedAt = types.StringNull()
 	m.UpdatedAt = types.StringNull()
 	m.Kind = types.StringNull()
+	m.PublicIP = types.StringNull()
+	m.PublicPort = types.Int64Null()
 	for _, v := range []*types.String{&m.CNIPlugin, &m.PodCIDR, &m.ServiceCIDR, &m.EndpointAccess} {
 		*v = nullIfUnknown(*v)
 	}

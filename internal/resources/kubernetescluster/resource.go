@@ -190,11 +190,19 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IPv4CIDR()},
 			},
 			"endpoint_access": schema.StringAttribute{
-				Description:   "Where the API server can be reached from: \"public\" (the default, from the internet, limited by api_allowed_cidrs), \"private\" (only from inside the cluster's network) or \"dual\" (both). Set at create once the cluster runs, and changes in place.",
+				Description:   "Where the API server can be reached from: \"private\" (the default, only from inside the cluster's network), \"public\" (from the internet, limited by api_allowed_cidrs) or \"dual\" (both). public and dual give the API server a public address of its own (public_ip, public_port), billed as a VPC public IP for every hour it is held. Changes in place.",
 				Optional:      true,
 				Computed:      true,
 				PlanModifiers: keep,
 				Validators:    []validator.String{resourcekit.OneOf("public", "private", "dual")},
+			},
+			"public_ip": schema.StringAttribute{
+				Description: "The public address the API server is reached on when endpoint_access is public or dual; null until it has one, and for private.",
+				Computed:    true,
+			},
+			"public_port": schema.Int64Attribute{
+				Description: "The public port the API server is reached on when endpoint_access is public or dual; null until it has one, and for private.",
+				Computed:    true,
 			},
 			"kind": schema.StringAttribute{
 				Description:   "How the platform runs the cluster, for example \"appliance\".",
@@ -324,13 +332,6 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	if err := r.wait(ctx, ref.OperationID, id); err != nil {
 		addWaitError(&resp.Diagnostics, "Error creating Kubernetes cluster", id, err)
 		return
-	}
-	// The create takes no endpoint access: set it once the cluster runs.
-	if mode, ok := endpointAccessChange(types.StringValue("public"), plan.EndpointAccess); ok {
-		ref, err := r.api.ConfigureKubernetesEndpointAccess(ctx, id, client.ConfigureKubernetesEndpointAccessRequest{EndpointAccess: mode})
-		if !r.applied(ctx, ref, err, "Error setting the endpoint access of Kubernetes cluster", pendingModel(plan, id), id, &resp.State, &resp.Diagnostics) {
-			return
-		}
 	}
 	r.refresh(ctx, plan, id, &resp.State, &resp.Diagnostics)
 }

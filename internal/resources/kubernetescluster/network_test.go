@@ -36,7 +36,7 @@ func TestCreateSendsTheNetworkSettings(t *testing.T) {
 		t.Errorf("calls = %v, want no endpoint change for an unset endpoint_access", api.calls)
 	}
 	m := getModel(t, resp.State)
-	if m.CNIPlugin.ValueString() != "calico" || m.Kind.ValueString() != "appliance" || m.EndpointAccess.ValueString() != "public" {
+	if m.CNIPlugin.ValueString() != "calico" || m.Kind.ValueString() != "appliance" || m.EndpointAccess.ValueString() != "private" {
 		t.Errorf("model = %+v", m)
 	}
 }
@@ -59,19 +59,32 @@ func TestCreateLeavesNetworkDefaultsToTheBackend(t *testing.T) {
 	}
 }
 
-func TestCreateSetsAPrivateEndpointOnceRunning(t *testing.T) {
-	api := &fakeAPI{}
-	a := args(2)
-	a["endpoint_access"] = Str("private")
-	resp := create(t, api, a)
-	if resp.Diagnostics.HasError() {
-		t.Fatal(resp.Diagnostics)
-	}
-	if !slices.Equal(api.calls, []string{"endpoint"}) || api.lastEndpoint.EndpointAccess != "private" || api.lastEndpoint.APIAllowedCIDRs != nil {
-		t.Errorf("calls %v, request %+v", api.calls, api.lastEndpoint)
-	}
-	if m := getModel(t, resp.State); m.EndpointAccess.ValueString() != "private" {
-		t.Errorf("endpoint_access = %v", m.EndpointAccess)
+// The create sends the chosen endpoint access, so a public cluster is
+// created public, with no change after it runs; unset is the API's
+// default, private.
+func TestCreateSendsTheEndpointAccess(t *testing.T) {
+	for _, tc := range []struct {
+		set  tftypes.Value
+		send string
+		want string
+	}{
+		{Str("public"), "public", "public"},
+		{Str("dual"), "dual", "dual"},
+		{UnknownStr(), "", "private"},
+	} {
+		api := &fakeAPI{}
+		a := args(2)
+		a["endpoint_access"] = tc.set
+		resp := create(t, api, a)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		if api.lastCreate.EndpointAccess != tc.send || len(api.calls) != 0 {
+			t.Errorf("%v: create sent %q with calls %v, want %q and no follow-up change", tc.set, api.lastCreate.EndpointAccess, api.calls, tc.send)
+		}
+		if m := getModel(t, resp.State); m.EndpointAccess.ValueString() != tc.want {
+			t.Errorf("%v: endpoint_access = %v, want %s", tc.set, m.EndpointAccess, tc.want)
+		}
 	}
 }
 
