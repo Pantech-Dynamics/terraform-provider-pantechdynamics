@@ -4,6 +4,7 @@ package subnet
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -12,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit"
@@ -36,9 +38,15 @@ var (
 	_ resource.ResourceWithImportState = &Resource{}
 )
 
+// clusterRetryEvery is how long Delete waits before asking again while the
+// nodes of a deleted Kubernetes cluster still hold the subnet.
+const clusterRetryEvery = 20 * time.Second
+
 // Resource manages one subnet.
 type Resource struct {
 	api subnetAPI
+	// retryEvery overrides clusterRetryEvery in tests.
+	retryEvery time.Duration
 }
 
 // New is the factory the provider registers.
@@ -202,19 +210,43 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	defer cancel()
 
 	id := state.ID.ValueString()
-	ref, err := r.api.DeleteSubnet(ctx, id)
+	ref, err := r.deleteOnceClustersLeave(ctx, id)
 	if errors.Is(err, client.ErrNotFound) {
 		return
 	}
 	if err != nil {
 		resourcekit.AddHintedError(&resp.Diagnostics, "Error deleting subnet", err, map[string]string{
 			client.CodeInvalidResourceState:        "A subnet cannot be deleted while instances are still in it. Remove those first, then try again.",
-			client.CodeSubnetHasKubernetesClusters: "Kubernetes clusters still run in this subnet. Delete them first (a pantechdynamics_kubernetes_cluster that uses this subnet_id depends on it, so Terraform destroys it first), then try again.",
+			client.CodeSubnetHasKubernetesClusters: "Kubernetes clusters still use this subnet. Delete them first (a pantechdynamics_kubernetes_cluster that uses this subnet_id depends on it, so Terraform destroys it first). The nodes of a cluster you just deleted are removed in the background, which can take up to an hour; the delete was retried until its timeout. Run `terraform destroy` again later, or raise timeouts.delete.",
 		})
 		return
 	}
 	if err := r.api.WaitForOperation(ctx, ref.OperationID, resourcekit.IsGone(r.status(id))); err != nil {
 		resourcekit.AddWaitError(&resp.Diagnostics, "Error deleting subnet", "subnet", id, err)
+	}
+}
+
+// deleteOnceClustersLeave sends the delete, and while the platform refuses it
+// because a Kubernetes cluster still holds the subnet, asks again until ctx
+// ends. A cluster deleted in the same apply holds its subnet until its nodes
+// are removed in the background, so the first refusal is expected there.
+func (r *Resource) deleteOnceClustersLeave(ctx context.Context, id string) (*client.OperationReference, error) {
+	every := r.retryEvery
+	if every == 0 {
+		every = clusterRetryEvery
+	}
+	for {
+		ref, err := r.api.DeleteSubnet(ctx, id)
+		var apiErr *client.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != client.CodeSubnetHasKubernetesClusters {
+			return ref, err
+		}
+		tflog.Info(ctx, "Kubernetes cluster nodes still hold the subnet; retrying its delete", map[string]any{"subnet_id": id})
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(every):
+		}
 	}
 }
 

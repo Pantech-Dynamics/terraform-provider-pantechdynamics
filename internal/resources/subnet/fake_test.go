@@ -15,6 +15,7 @@ type fakeAPI struct {
 	subnets []client.Subnet
 
 	createErr, getErr, deleteErr, waitErr error
+	deleteErrTimes                        int // deleteErr is returned this many times; 0 means always
 	createState                           string
 	opStuck, keepOnDelete                 bool
 	op                                    *client.Operation
@@ -65,7 +66,7 @@ func (f *fakeAPI) GetSubnet(_ context.Context, id string) (*client.Subnet, error
 
 func (f *fakeAPI) DeleteSubnet(_ context.Context, id string) (*client.OperationReference, error) {
 	f.deletes++
-	if f.deleteErr != nil {
+	if f.deleteErr != nil && (f.deleteErrTimes == 0 || f.deletes <= f.deleteErrTimes) {
 		return nil, f.deleteErr
 	}
 	for i := range f.subnets {
