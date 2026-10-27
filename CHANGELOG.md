@@ -14,6 +14,8 @@ BUG FIXES:
 
 - Waiting for an operation now rides out short outages (`429`, `502`, `503`, `504` and network errors) until the resource's timeout, instead of failing the apply on the first one. A wait that times out during one reports it.
 - `pantechdynamics_kubernetes_cluster`: a change to `endpoint_access = "public"` or `"dual"` now finishes only once `public_ip` and `public_port` are set. `kube_config` is downloaded again whenever `endpoint`, `public_ip` or `public_port` changes, so it no longer points kubectl at an old address.
+- Waiting for an operation now waits as long as the API's `Retry-After` asks (up to 30 seconds) before its next check, instead of polling again after 2 seconds. The wait still ends at the resource's timeout.
+- `pantechdynamics_kubernetes_cluster`: changing `kubernetes_version_id` on a cluster that keeps the version it was created with (its `available_upgrade_ids` is empty) now fails with `KUBERNETES_UPGRADE_NOT_AVAILABLE` and says to create a new cluster on that version.
 - `pantechdynamics_subnet`: destroying a subnet right after the Kubernetes cluster in it now retries while the cluster's nodes are removed in the background (`SUBNET_HAS_KUBERNETES_CLUSTERS`), until the delete timeout, instead of failing at once.
 
 ## 0.5.1 (2026-10-22)

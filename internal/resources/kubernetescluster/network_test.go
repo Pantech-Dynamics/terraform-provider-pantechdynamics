@@ -263,3 +263,15 @@ func TestOverlapRefusalPointsAtTheRange(t *testing.T) {
 		t.Fatalf("diagnostics = %v", resp.Diagnostics)
 	}
 }
+
+// A cluster that keeps the version it was created with refuses an
+// upgrade; the error says what to do instead.
+func TestUpgradeRefusalExplainsTheVersionIsFixed(t *testing.T) {
+	api := seeded()
+	api.upgradeErr = &client.APIError{Status: 409, Code: client.CodeKubernetesUpgradeNotAvailable, Detail: "cannot be upgraded in place"}
+	resp := updateFrom(t, api, withNetwork(), func(a map[string]tftypes.Value) { a["kubernetes_version_id"] = Str("k8sv_next") })
+	errs := resp.Diagnostics.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0].Detail(), "create a new cluster on the version you need") {
+		t.Fatalf("diagnostics = %v", resp.Diagnostics)
+	}
+}

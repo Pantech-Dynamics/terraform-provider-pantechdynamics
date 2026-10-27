@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Sentinel errors let callers branch with errors.Is, much like catching a
@@ -75,6 +76,10 @@ type APIError struct {
 	Title     string
 	Detail    string
 	RequestID string
+
+	// RetryAfter is the server's Retry-After (delay-in-seconds form), zero
+	// when it sent none. A wait that rides out a 429 or 503 honors it.
+	RetryAfter time.Duration
 
 	// Errors is set on 422 responses and names each invalid field, so the
 	// provider can point at the exact attribute.

@@ -51,6 +51,10 @@ const (
 	// pod_cidr or service_cidr on a cluster whose pod network is fixed at
 	// creation.
 	CodeKubernetesNetworkNotChangeable = "KUBERNETES_NETWORK_NOT_CHANGEABLE"
+
+	// CodeKubernetesUpgradeNotAvailable refuses an upgrade of a cluster that
+	// runs the version it was created with.
+	CodeKubernetesUpgradeNotAvailable = "KUBERNETES_UPGRADE_NOT_AVAILABLE"
 )
 
 // Field codes a 422 from the Kubernetes endpoints carries in its errors list.
