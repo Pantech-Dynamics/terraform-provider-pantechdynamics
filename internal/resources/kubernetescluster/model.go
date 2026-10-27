@@ -30,6 +30,9 @@ type model struct {
 	Nodes               types.Int64    `tfsdk:"nodes"`
 	ObservedState       types.String   `tfsdk:"observed_state"`
 	InSync              types.Bool     `tfsdk:"in_sync"`
+	NodeHealth          types.String   `tfsdk:"node_health"`
+	ReadyNodes          types.Int64    `tfsdk:"ready_nodes"`
+	NodesCheckedAt      types.String   `tfsdk:"nodes_checked_at"`
 	AvailableUpgradeIDs types.List     `tfsdk:"available_upgrade_ids"`
 	Autoscaling         types.Object   `tfsdk:"autoscaling"`
 	APIAllowedCIDRs     types.Set      `tfsdk:"api_allowed_cidrs"`
@@ -132,7 +135,9 @@ func toUpdateRequest(ctx context.Context, state, plan model) (req client.UpdateK
 }
 
 // toNetworkRequest builds the upgrade-network body from the network settings
-// the configuration changes. changed is false when none does.
+// the configuration changes. changed is false when none does. An appliance
+// cluster's network is fixed, so its plan replaces the cluster instead and
+// this never finds a change for it.
 func toNetworkRequest(state, plan model) (req client.UpgradeKubernetesNetworkRequest, changed bool) {
 	pick := func(p, s types.String) string {
 		if p.IsNull() || p.IsUnknown() || p.Equal(s) {
@@ -268,6 +273,9 @@ func fromAPIResponse(ctx context.Context, prev model, k *client.KubernetesCluste
 		Nodes:               types.Int64Value(k.Nodes),
 		ObservedState:       types.StringValue(k.ObservedState),
 		InSync:              types.BoolValue(k.InSync),
+		NodeHealth:          resourcekit.OptionalString(k.NodeHealth),
+		ReadyNodes:          resourcekit.OptionalInt64(k.ReadyNodes),
+		NodesCheckedAt:      resourcekit.Timestamp(k.NodesCheckedAt),
 		AvailableUpgradeIDs: upgrades,
 		Autoscaling:         auto,
 		APIAllowedCIDRs:     cidrSet,
@@ -304,6 +312,9 @@ func pendingModel(plan model, id string) model {
 	m.Nodes = types.Int64Null()
 	m.ObservedState = types.StringNull()
 	m.InSync = types.BoolNull()
+	m.NodeHealth = types.StringNull()
+	m.ReadyNodes = types.Int64Null()
+	m.NodesCheckedAt = types.StringNull()
 	m.AvailableUpgradeIDs = types.ListNull(types.StringType)
 	m.KubeConfig = types.StringNull()
 	m.CreatedAt = types.StringNull()
@@ -324,6 +335,12 @@ func upgradeIDs(k *client.KubernetesCluster) []string {
 		ids = append(ids, v.ID)
 	}
 	return ids
+}
+
+// apiAddressChanged reports whether the API server is reached somewhere else
+// in m than in prev, which makes a kubeconfig downloaded for prev stale.
+func apiAddressChanged(prev, m model) bool {
+	return !prev.Endpoint.Equal(m.Endpoint) || !prev.PublicIP.Equal(m.PublicIP) || !prev.PublicPort.Equal(m.PublicPort)
 }
 
 // hasKubeConfig reports whether the state already holds a kubeconfig.

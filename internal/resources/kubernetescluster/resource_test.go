@@ -90,6 +90,7 @@ func stored() map[string]tftypes.Value {
 	a["available_upgrade_ids"], a["kube_config"] = strList("k8sv_2"), Str(testKubeconfig)
 	a["created_at"], a["updated_at"] = Str("2026-10-07T10:00:00Z"), Str("2026-10-07T10:00:00Z")
 	a["endpoint"], a["volume_storage_gb"] = Str("https://k8s_1.example.test:6443"), Num(30)
+	a["public_ip"], a["public_port"] = Str("203.0.113.10"), Num(6443)
 	return a
 }
 

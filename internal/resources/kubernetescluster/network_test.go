@@ -1,14 +1,18 @@
 package kubernetescluster
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 	. "github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit/kittest"
 )
 
@@ -150,5 +154,112 @@ func TestPlanMarksTheNodeSizeChangingOnAResize(t *testing.T) {
 				t.Errorf("node unknown = %v, want %v (%v)", node.IsUnknown(), tt.unknown, resp.Diagnostics)
 			}
 		})
+	}
+}
+
+// privateCluster is the stored cluster with a private endpoint: no public
+// address.
+func privateCluster(api *fakeAPI) map[string]tftypes.Value {
+	k := &api.clusters[0]
+	k.EndpointAccess, k.PublicIP, k.PublicPort = "private", nil, nil
+	a := withNetwork()
+	a["endpoint_access"] = Str("private")
+	a["public_ip"], a["public_port"] = tftypes.NewValue(tftypes.String, nil), tftypes.NewValue(tftypes.Number, nil)
+	return a
+}
+
+// A switch to public finishes only once the public address exists, and the
+// kubeconfig is downloaded again for the new address.
+func TestSwitchToPublicWaitsForThePublicAddress(t *testing.T) {
+	api := seeded()
+	resp := updateFrom(t, api, privateCluster(api), func(a map[string]tftypes.Value) { a["endpoint_access"] = Str("public") })
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	m := getModel(t, resp.State)
+	if m.PublicIP.ValueString() != "203.0.113.10" || m.PublicPort.ValueInt64() != 6443 {
+		t.Errorf("public address = %v:%v", m.PublicIP, m.PublicPort)
+	}
+	if api.kubeconfigs != 1 {
+		t.Errorf("kubeconfig downloads = %d, want 1 for the new address", api.kubeconfigs)
+	}
+
+	api = seeded()
+	api.unrouted = true
+	resp = updateFrom(t, api, privateCluster(api), func(a map[string]tftypes.Value) { a["endpoint_access"] = Str("public") })
+	if !resp.Diagnostics.HasError() || !strings.Contains(ErrorText(resp.Diagnostics), "never settled") {
+		t.Errorf("diagnostics = %v, want the wait to go on while there is no public address", resp.Diagnostics)
+	}
+}
+
+func TestReadDownloadsTheKubeconfigAgainWhenTheAPIServerMoves(t *testing.T) {
+	s := testSchema(t)
+	api := seeded()
+	api.clusters[0].PublicIP = ptr("203.0.113.99")
+	resp := &resource.ReadResponse{State: stateFor(s)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() || api.kubeconfigs != 1 {
+		t.Fatalf("downloads = %d, diagnostics = %v", api.kubeconfigs, resp.Diagnostics)
+	}
+	if m := getModel(t, resp.State); m.PublicIP.ValueString() != "203.0.113.99" {
+		t.Errorf("public_ip = %v", m.PublicIP)
+	}
+
+	// A failed download keeps the old address, so the next refresh tries again.
+	api = seeded()
+	api.clusters[0].PublicIP, api.kubeconfigErr = ptr("203.0.113.99"), errors.New("boom")
+	resp = &resource.ReadResponse{State: stateFor(s)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() || resp.Diagnostics.WarningsCount() != 1 {
+		t.Fatalf("diagnostics = %v, want one warning", resp.Diagnostics)
+	}
+	if m := getModel(t, resp.State); m.PublicIP.ValueString() != "203.0.113.10" || m.KubeConfig.ValueString() != testKubeconfig {
+		t.Errorf("public_ip = %v, kube_config kept = %v", m.PublicIP, m.KubeConfig.ValueString() == testKubeconfig)
+	}
+}
+
+func TestReadReportsNodeHealth(t *testing.T) {
+	s := testSchema(t)
+	api := seeded()
+	ready := int64(1)
+	api.clusters[0].NodeHealth, api.clusters[0].ReadyNodes, api.clusters[0].NodesCheckedAt = ptr("degraded"), &ready, now()
+	resp := &resource.ReadResponse{State: stateFor(s)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	m := getModel(t, resp.State)
+	if m.NodeHealth.ValueString() != "degraded" || m.ReadyNodes.ValueInt64() != 1 || m.NodesCheckedAt.ValueString() != "2026-10-07T10:00:00Z" {
+		t.Errorf("node health = %v, %v, %v", m.NodeHealth, m.ReadyNodes, m.NodesCheckedAt)
+	}
+}
+
+// An appliance cluster's pod network is fixed at creation, so changing it
+// plans a replacement instead of an in-place change the platform refuses.
+func TestNetworkChangeReplacesAnApplianceCluster(t *testing.T) {
+	s := testSchema(t)
+	for kind, want := range map[string]bool{"appliance": true, "other": false} {
+		st := withNetwork()
+		st["kind"] = Str(kind)
+		pl := withNetwork()
+		pl["kind"], pl["pod_cidr"] = Str(kind), Str("10.244.0.0/16")
+		req := planmodifier.StringRequest{
+			Path: path.Root("pod_cidr"), State: State(s, st), Plan: Plan(s, pl),
+			StateValue: types.StringValue("10.42.0.0/16"), PlanValue: types.StringValue("10.244.0.0/16"), ConfigValue: types.StringValue("10.244.0.0/16"),
+		}
+		resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+		networkFixedAtCreation().PlanModifyString(Ctx, req, resp)
+		if resp.Diagnostics.HasError() || resp.RequiresReplace != want {
+			t.Errorf("kind %s: requires replace = %v, want %v (%v)", kind, resp.RequiresReplace, want, resp.Diagnostics)
+		}
+	}
+}
+
+func TestOverlapRefusalPointsAtTheRange(t *testing.T) {
+	api := &fakeAPI{createErr: &client.APIError{Status: 422, Code: "VALIDATION_FAILED", Errors: []client.FieldError{{Field: "pod_cidr", Code: client.CodeKubernetesPodCIDROverlap, Message: "overlaps"}}}}
+	resp := create(t, api, args(2))
+	errs := resp.Diagnostics.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0].Detail(), "leave pod_cidr unset") {
+		t.Fatalf("diagnostics = %v", resp.Diagnostics)
 	}
 }
