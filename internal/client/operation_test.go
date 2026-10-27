@@ -202,3 +202,66 @@ func TestWaitForOperationPassesAnOperationErrorFromDoneThrough(t *testing.T) {
 		t.Errorf("err = %q, must not be wrapped", err)
 	}
 }
+
+// A poll the API cannot answer for a moment (503 PROVISIONING_UNAVAILABLE,
+// after the client's own retries) does not fail the wait: the write was
+// already accepted, and an apply failed that way left Terraform without the
+// resource it had created. The wait goes on and finishes when the
+// operation does.
+func TestWaitForOperationRidesOutTransientErrors(t *testing.T) {
+	for name, status := range map[string]int{"503": http.StatusServiceUnavailable, "429": http.StatusTooManyRequests, "502": http.StatusBadGateway} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				if calls <= 5 { // more than one poll's worth of client retries
+					w.Header().Set("Content-Type", "application/problem+json")
+					w.WriteHeader(status)
+					_, _ = w.Write([]byte(`{"status":503,"code":"PROVISIONING_UNAVAILABLE","detail":"Wait a few seconds, then retry.","request_id":"req_1"}`))
+					return
+				}
+				_, _ = w.Write([]byte(opJSON("succeeded", "null")))
+			})
+			if err := c.WaitForOperation(context.Background(), "op_1", nil); err != nil {
+				t.Fatalf("err = %v, want the wait to ride out the %d", err, status)
+			}
+			if calls != 6 {
+				t.Fatalf("calls = %d, want 6", calls)
+			}
+		})
+	}
+}
+
+// A transient error still ends the wait when ctx does, and is named.
+func TestWaitForOperationReportsTheLastTransientErrorWhenItTimesOut(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":503,"code":"PROVISIONING_UNAVAILABLE","request_id":"req_1"}`))
+	})
+	polls := 0
+	c.retry.sleep = func(ctx context.Context, _ time.Duration) error {
+		polls++
+		if polls >= 10 {
+			cancel()
+		}
+		return ctx.Err()
+	}
+	err := c.WaitForOperation(ctx, "op_1", nil)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "PROVISIONING_UNAVAILABLE") {
+		t.Fatalf("err = %v, want context.Canceled naming PROVISIONING_UNAVAILABLE", err)
+	}
+}
+
+// A permanent error still ends the wait at once.
+func TestWaitForOperationStopsOnPermanentErrors(t *testing.T) {
+	calls := 0
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"status":403,"code":"FORBIDDEN","request_id":"req_1"}`))
+	})
+	if err := c.WaitForOperation(context.Background(), "op_1", nil); !HasCode(err, "FORBIDDEN") || calls != 1 {
+		t.Fatalf("err = %v after %d calls, want FORBIDDEN after 1", err, calls)
+	}
+}

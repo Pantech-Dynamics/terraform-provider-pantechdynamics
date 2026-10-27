@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+FEATURES:
+
+- `pantechdynamics_kubernetes_cluster`: new read-only `node_health` (`healthy`, `degraded` or `unknown`; null while the cluster is not running), `ready_nodes` and `nodes_checked_at`, what Kubernetes last reported of the nodes. A cluster with a NotReady node still reports `observed_state = "running"`; `node_health` shows it.
+
+BREAKING CHANGES:
+
+- `pantechdynamics_kubernetes_cluster`: changing `cni_plugin`, `pod_cidr` or `service_cidr` now **replaces** the cluster. The platform fixes the pod network of a cluster when it is created and refuses the change (`KUBERNETES_NETWORK_NOT_CHANGEABLE`); the plan said "update in-place" before. Left unset, `pod_cidr` and `service_cidr` are now chosen clear of the cluster's VPC network and subnet, and a range that overlaps them is refused at create with `KUBERNETES_POD_CIDR_OVERLAP` or `KUBERNETES_SERVICE_CIDR_OVERLAP` on that attribute. Existing clusters keep the ranges in their state.
+
+BUG FIXES:
+
+- Waiting for an operation now rides out short outages (`429`, `502`, `503`, `504` and network errors) until the resource's timeout, instead of failing the apply on the first one. A wait that times out during one reports it.
+- `pantechdynamics_kubernetes_cluster`: a change to `endpoint_access = "public"` or `"dual"` now finishes only once `public_ip` and `public_port` are set. `kube_config` is downloaded again whenever `endpoint`, `public_ip` or `public_port` changes, so it no longer points kubectl at an old address.
+- `pantechdynamics_subnet`: destroying a subnet right after the Kubernetes cluster in it now retries while the cluster's nodes are removed in the background (`SUBNET_HAS_KUBERNETES_CLUSTERS`), until the delete timeout, instead of failing at once.
+
 ## 0.5.1 (2026-10-22)
 
 BUG FIXES:

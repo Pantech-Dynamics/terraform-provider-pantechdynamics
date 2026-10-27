@@ -21,6 +21,7 @@ type fakeAPI struct {
 	outOfSync                                                                   bool // the cluster never reports in_sync
 	opStuck                                                                     bool
 	deleteRemoves                                                               bool // GET answers not found right after a delete, as the API does
+	unrouted                                                                    bool // a public or dual cluster never gets its public address
 	op                                                                          *client.Operation
 
 	nextID      int
@@ -58,7 +59,19 @@ func cluster(id string, workers int64) client.KubernetesCluster {
 		AvailableUpgrades: []client.KubernetesVersion{{ID: "k8sv_2", ZoneID: "af-abj-2", Version: "1.32.0", Status: "available"}},
 		APIAllowedCIDRs:   []string{}, Endpoint: ptr("https://" + id + ".example.test:6443"), VolumeStorageGB: 30,
 		Kind: "appliance", CNIPlugin: "flannel", PodCIDR: "10.42.0.0/16", ServiceCIDR: "10.43.0.0/16", EndpointAccess: "public",
+		PublicIP: ptr("203.0.113.10"), PublicPort: ptr64(6443),
 		CreatedAt: now(), UpdatedAt: now(),
+	}
+}
+
+func ptr64(n int64) *int64 { return &n }
+
+// route gives a public or dual cluster its public address and takes it from
+// a private one, as the platform does once the change is routed.
+func (f *fakeAPI) route(k *client.KubernetesCluster) {
+	k.PublicIP, k.PublicPort = nil, nil
+	if k.EndpointAccess != "private" && !f.unrouted {
+		k.PublicIP, k.PublicPort = ptr("203.0.113.10"), ptr64(6443)
 	}
 }
 
@@ -96,6 +109,7 @@ func (f *fakeAPI) CreateKubernetesCluster(_ context.Context, req client.CreateKu
 	if req.EndpointAccess != "" {
 		k.EndpointAccess = req.EndpointAccess
 	}
+	f.route(&k)
 	if req.APIAllowedCIDRs != nil {
 		k.APIAllowedCIDRs = slices.Sorted(slices.Values(req.APIAllowedCIDRs))
 	}
@@ -200,6 +214,7 @@ func (f *fakeAPI) ConfigureKubernetesEndpointAccess(_ context.Context, id string
 	f.lastEndpoint = req
 	if k := f.find(id); k != nil {
 		k.EndpointAccess = req.EndpointAccess
+		f.route(k)
 	}
 	return &client.OperationReference{OperationID: "op_endpoint", ResourceID: id}, nil
 }

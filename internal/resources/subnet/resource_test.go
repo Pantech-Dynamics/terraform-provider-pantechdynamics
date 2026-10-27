@@ -1,8 +1,10 @@
 package subnet
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -127,12 +129,14 @@ func TestDeleteIsIdempotentAndExplainsRefusals(t *testing.T) {
 	}{
 		{"already gone", client.ErrNotFound, ""},
 		{"still in use", &client.APIError{Status: 409, Code: client.CodeInvalidResourceState, Detail: "subnet has instances"}, "instances are still in it"},
-		{"clusters in it", &client.APIError{Status: 409, Code: client.CodeSubnetHasKubernetesClusters, Detail: "subnet has clusters"}, "Kubernetes clusters still run in this subnet"},
+		{"clusters still in it at the timeout", &client.APIError{Status: 409, Code: client.CodeSubnetHasKubernetesClusters, Detail: "subnet has clusters"}, "Kubernetes clusters still use this subnet"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(Ctx, 50*time.Millisecond)
+			defer cancel()
 			resp := &resource.DeleteResponse{State: stateFor(s)}
-			(&Resource{api: &fakeAPI{deleteErr: tt.err}}).Delete(Ctx, resource.DeleteRequest{State: stateFor(s)}, resp)
+			(&Resource{api: &fakeAPI{deleteErr: tt.err}, retryEvery: time.Millisecond}).Delete(ctx, resource.DeleteRequest{State: stateFor(s)}, resp)
 			if tt.wantErr == "" && resp.Diagnostics.HasError() {
 				t.Fatal(resp.Diagnostics)
 			}
@@ -140,6 +144,26 @@ func TestDeleteIsIdempotentAndExplainsRefusals(t *testing.T) {
 				t.Errorf("diagnostics = %q, want %q", ErrorText(resp.Diagnostics), tt.wantErr)
 			}
 		})
+	}
+}
+
+// A cluster deleted in the same apply holds its subnet until its nodes are
+// removed in the background, so Delete asks again until the platform lets go.
+func TestDeleteRetriesWhileADeletedClusterStillHoldsTheSubnet(t *testing.T) {
+	s := testSchema(t)
+	api := &fakeAPI{
+		subnets:        []client.Subnet{{ID: "snet_1", ObservedState: "active"}},
+		deleteErr:      &client.APIError{Status: 409, Code: client.CodeSubnetHasKubernetesClusters},
+		deleteErrTimes: 2,
+		opStuck:        true,
+	}
+	resp := &resource.DeleteResponse{State: stateFor(s)}
+	(&Resource{api: api, retryEvery: time.Millisecond}).Delete(Ctx, resource.DeleteRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if api.deletes != 3 {
+		t.Errorf("deletes = %d, want 3 (two refusals, then accepted)", api.deletes)
 	}
 }
 

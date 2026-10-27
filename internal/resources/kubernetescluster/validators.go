@@ -11,6 +11,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -232,4 +234,21 @@ func planNodeResize(ctx context.Context, req resource.ModifyPlanRequest, resp *r
 	}
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("node"), types.ObjectUnknown(nodeAttrTypes))...)
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("node_plan_id"), types.StringUnknown())...)
+}
+
+// networkFixedAtCreation replaces an appliance cluster when cni_plugin,
+// pod_cidr or service_cidr changes: the platform refuses to change the pod
+// network of a running appliance cluster (KUBERNETES_NETWORK_NOT_CHANGEABLE),
+// so the plan says "forces replacement" instead of promising an in-place
+// change that fails at apply. Another kind keeps the in-place change.
+func networkFixedAtCreation() planmodifier.String {
+	return stringplanmodifier.RequiresReplaceIf(
+		func(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+			var kind types.String
+			resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("kind"), &kind)...)
+			resp.RequiresReplace = kind.IsNull() || kind.IsUnknown() || kind.ValueString() == "appliance"
+		},
+		"Changing it replaces an appliance cluster, whose pod network is fixed at creation.",
+		"Changing it replaces an appliance cluster, whose pod network is fixed at creation.",
+	)
 }

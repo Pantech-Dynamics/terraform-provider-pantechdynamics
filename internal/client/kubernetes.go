@@ -43,8 +43,14 @@ const (
 	CodeKubeconfigUnavailable = "KUBECONFIG_UNAVAILABLE"
 
 	// CodeSubnetHasKubernetesClusters refuses deleting a subnet that clusters
-	// still run in.
+	// still use, including a deleted cluster whose nodes are still being
+	// removed.
 	CodeSubnetHasKubernetesClusters = "SUBNET_HAS_KUBERNETES_CLUSTERS"
+
+	// CodeKubernetesNetworkNotChangeable refuses a change of cni_plugin,
+	// pod_cidr or service_cidr on a cluster whose pod network is fixed at
+	// creation.
+	CodeKubernetesNetworkNotChangeable = "KUBERNETES_NETWORK_NOT_CHANGEABLE"
 )
 
 // Field codes a 422 from the Kubernetes endpoints carries in its errors list.
@@ -63,6 +69,8 @@ const (
 	CodeInvalidKubernetesAutoscaling  = "INVALID_KUBERNETES_AUTOSCALING"
 	CodeInvalidAPIAllowedCIDRs        = "INVALID_API_ALLOWED_CIDRS"
 	CodeAPIAllowedCIDRsVPCOnly        = "API_ALLOWED_CIDRS_VPC_ONLY"
+	CodeKubernetesPodCIDROverlap      = "KUBERNETES_POD_CIDR_OVERLAP"
+	CodeKubernetesServiceCIDROverlap  = "KUBERNETES_SERVICE_CIDR_OVERLAP"
 )
 
 // Cluster observed states the provider branches on.
@@ -144,10 +152,16 @@ type KubernetesCluster struct {
 	EndpointAccess      string                `json:"endpoint_access"`
 	// PublicIP and PublicPort are where a public or dual API server is
 	// reached; nil until the cluster has a public address, and for private.
-	PublicIP   *string    `json:"public_ip"`
-	PublicPort *int64     `json:"public_port"`
-	CreatedAt  *time.Time `json:"created_at"`
-	UpdatedAt  *time.Time `json:"updated_at"`
+	PublicIP   *string `json:"public_ip"`
+	PublicPort *int64  `json:"public_port"`
+	// NodeHealth is what Kubernetes last reported of the nodes while the
+	// cluster runs: healthy, degraded or unknown; nil while it is not running.
+	// ReadyNodes is nil when NodeHealth is unknown or nil.
+	NodeHealth     *string    `json:"node_health"`
+	ReadyNodes     *int64     `json:"ready_nodes"`
+	NodesCheckedAt *time.Time `json:"nodes_checked_at"`
+	CreatedAt      *time.Time `json:"created_at"`
+	UpdatedAt      *time.Time `json:"updated_at"`
 }
 
 // CreateKubernetesClusterRequest creates a cluster. SubnetID is required in a
@@ -156,7 +170,7 @@ type KubernetesCluster struct {
 // which the backend allows only with autoscaling enabled (it then starts at
 // MinWorkers). APIAllowedCIDRs is VPC zone only; empty is omitted (any address).
 // Empty CNIPlugin, PodCIDR and ServiceCIDR are omitted, so the backend applies
-// flannel, 10.42.0.0/16 and 10.43.0.0/16. An empty EndpointAccess is omitted,
+// flannel and pod and service ranges clear of the cluster's network. An empty EndpointAccess is omitted,
 // so the backend creates the cluster private.
 type CreateKubernetesClusterRequest struct {
 	Name                string                 `json:"name"`

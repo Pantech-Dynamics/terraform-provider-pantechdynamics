@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -83,16 +84,50 @@ type pollCheck func(ctx context.Context) (done bool, status string, err error)
 // pollUntil is the one polling loop. It runs check, and if the wait is not over
 // it sleeps one poll interval, until check ends the wait or ctx does. what names
 // the thing waited for, in error messages.
+//
+// A check that fails transiently (a 429, a 502, 503 or 504 such as
+// PROVISIONING_UNAVAILABLE, or a dropped connection) does not end the wait:
+// the write it follows has already been accepted, and failing the apply
+// over one unanswered poll left Terraform without the resource it had
+// created. The wait goes on until a check answers or ctx ends, and the last
+// such error is reported if ctx ends first.
 func (c *Client) pollUntil(ctx context.Context, what string, check pollCheck) error {
+	var lastTransient error
 	for {
 		done, status, err := check(ctx)
-		if err != nil || done {
+		switch {
+		case err != nil && ctx.Err() == nil && isTransient(err):
+			lastTransient = err
+		case err != nil && ctx.Err() != nil && lastTransient != nil:
+			return fmt.Errorf("waiting for %s (last error: %v): %w", what, lastTransient, err)
+		case err != nil || done:
 			return err
+		default:
+			lastTransient = nil
 		}
 		if err := c.retry.sleep(ctx, c.pollInterval); err != nil {
+			if lastTransient != nil {
+				return fmt.Errorf("waiting for %s (last status %q, last error: %v): %w", what, status, lastTransient, err)
+			}
 			return fmt.Errorf("waiting for %s (last status %q): %w", what, status, err)
 		}
 	}
+}
+
+// isTransient reports an error a poll can wait out: the API asked the
+// caller to slow down or was briefly unavailable (429, 502, 503, 504), or
+// the request never got an answer. A context ending is never transient.
+func isTransient(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == http.StatusTooManyRequests || isGatewayError(apiErr.Status)
+	}
+	var urlErr *url.Error
+	var netErr net.Error
+	return errors.As(err, &urlErr) || errors.As(err, &netErr)
 }
 
 // WaitForOperation polls until the operation succeeds, done reports true, the

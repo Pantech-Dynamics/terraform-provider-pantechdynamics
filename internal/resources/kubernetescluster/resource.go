@@ -86,8 +86,9 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	replaceStr := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
+	fixedNetwork := []planmodifier.String{stringplanmodifier.UseStateForUnknown(), networkFixedAtCreation()}
 	resp.Schema = schema.Schema{
-		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down); node_plan changes in place by moving every node to the new plan; cni_plugin, pod_cidr and service_cidr change in place by rebuilding the pod network (pods restart); endpoint_access changes in place. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later.",
+		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down); node_plan changes in place by moving every node to the new plan; endpoint_access changes in place. cni_plugin, pod_cidr and service_cidr are fixed when an appliance cluster is created, so changing them replaces it. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later. Its subnet stays in use until the nodes are removed in the background, so a pantechdynamics_subnet destroyed in the same run waits for that.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the cluster, starting with k8s_.",
@@ -169,28 +170,28 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: keep,
 			},
 			"cni_plugin": schema.StringAttribute{
-				Description:   "The pod network plugin: \"flannel\" (the default), \"wireguard\" (flannel with traffic between nodes encrypted) or \"calico\" (network policies). Changes in place by rebuilding the pod network; pods restart.",
+				Description:   "The pod network plugin: \"flannel\" (the default), \"wireguard\" (flannel with traffic between nodes encrypted) or \"calico\" (network policies). Fixed when an appliance cluster is created: changing it replaces the cluster.",
 				Optional:      true,
 				Computed:      true,
-				PlanModifiers: keep,
+				PlanModifiers: fixedNetwork,
 				Validators:    []validator.String{resourcekit.OneOf("flannel", "wireguard", "calico")},
 			},
 			"pod_cidr": schema.StringAttribute{
-				Description:   "The pods' IPv4 address range. Defaults to \"10.42.0.0/16\". Change it only when it overlaps a network the pods must reach. Changes in place by rebuilding the pod network; pods restart.",
+				Description:   "The pods' IPv4 address range. Left unset, the platform picks the first of 10.42.0.0/16, 10.244.0.0/16, 172.20.0.0/16 and 192.168.0.0/17 that does not overlap the cluster's VPC network, subnet or service_cidr. A range that overlaps them is refused with KUBERNETES_POD_CIDR_OVERLAP. Fixed when an appliance cluster is created: changing it replaces the cluster.",
 				Optional:      true,
 				Computed:      true,
-				PlanModifiers: keep,
+				PlanModifiers: fixedNetwork,
 				Validators:    []validator.String{resourcekit.IPv4CIDR()},
 			},
 			"service_cidr": schema.StringAttribute{
-				Description:   "The services' IPv4 address range. Defaults to \"10.43.0.0/16\". Changes in place by rebuilding the pod network; pods restart.",
+				Description:   "The services' IPv4 address range. Left unset, the platform picks the first of 10.43.0.0/16, 10.96.0.0/16, 172.21.0.0/16 and 192.168.128.0/17 that does not overlap the cluster's VPC network, subnet or pod_cidr. A range that overlaps them is refused with KUBERNETES_SERVICE_CIDR_OVERLAP. Fixed when an appliance cluster is created: changing it replaces the cluster.",
 				Optional:      true,
 				Computed:      true,
-				PlanModifiers: keep,
+				PlanModifiers: fixedNetwork,
 				Validators:    []validator.String{resourcekit.IPv4CIDR()},
 			},
 			"endpoint_access": schema.StringAttribute{
-				Description:   "Where the API server can be reached from: \"private\" (the default, only from inside the cluster's network), \"public\" (from the internet, limited by api_allowed_cidrs) or \"dual\" (both). public and dual give the API server a public address of its own (public_ip, public_port), billed as a VPC public IP for every hour it is held. Changes in place.",
+				Description:   "Where the API server can be reached from: \"private\" (the default, only from inside the cluster's network), \"public\" (from the internet, limited by api_allowed_cidrs) or \"dual\" (both). public and dual give the API server a public address of its own (public_ip, public_port), billed as a VPC public IP for every hour it is held, and open its port on the subnet to api_allowed_cidrs (or any address). Changes in place; a change to public or dual finishes once the public address is routed.",
 				Optional:      true,
 				Computed:      true,
 				PlanModifiers: keep,
@@ -249,13 +250,25 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Description: "False while a scale or upgrade has not finished.",
 				Computed:    true,
 			},
+			"node_health": schema.StringAttribute{
+				Description: "What Kubernetes last reported of the nodes while the cluster runs: \"healthy\" (every node Ready), \"degraded\" (a node is NotReady, or fewer are Ready than the cluster should run) or \"unknown\" (the nodes could not be read in the last 15 minutes, for example a private endpoint whose agent is not connected). Read about every 5 minutes; null while the cluster is not running. A degraded cluster still reports observed_state \"running\".",
+				Computed:    true,
+			},
+			"ready_nodes": schema.Int64Attribute{
+				Description: "Nodes Kubernetes reported Ready at nodes_checked_at; null when node_health is unknown or null.",
+				Computed:    true,
+			},
+			"nodes_checked_at": schema.StringAttribute{
+				Description: "When the nodes were last read, in RFC 3339 UTC, to the second; null if never.",
+				Computed:    true,
+			},
 			"available_upgrade_ids": schema.ListAttribute{
 				Description: "Ids of the Kubernetes versions the cluster can be upgraded to now, the values kubernetes_version_id may change to.",
 				ElementType: types.StringType,
 				Computed:    true,
 			},
 			"kube_config": schema.StringAttribute{
-				Description:   "The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key) and is refreshed only when the state holds none.",
+				Description:   "The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key), and again when the state holds none or the API server's address (endpoint, public_ip or public_port) changed.",
 				Computed:      true,
 				Sensitive:     true,
 				PlanModifiers: keep,
@@ -337,8 +350,9 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 }
 
 // Read refreshes state. A cluster deleted outside Terraform is removed from
-// state. The kubeconfig is downloaded only when the state holds none, so plans
-// stay stable and a refresh does not mint a credential each time.
+// state. The kubeconfig is downloaded only when the state holds none or the
+// API server's address changed, so a refresh does not mint a credential each
+// time.
 func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state model
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -357,7 +371,7 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	}
 	m, diags := fromAPIResponse(ctx, state, k)
 	resp.Diagnostics.Append(diags...)
-	r.fillKubeConfig(ctx, &m, k, &resp.Diagnostics)
+	r.fillKubeConfig(ctx, state, &m, k, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, m)...)
 }
 
@@ -503,7 +517,8 @@ func (r *Resource) wait(ctx context.Context, opID, id string) error {
 }
 
 // refresh reads the cluster and stores it, keeping what only Terraform knows
-// from prev and downloading the kubeconfig if prev holds none.
+// from prev and downloading the kubeconfig if prev holds none or the API
+// server moved.
 func (r *Resource) refresh(ctx context.Context, prev model, id string, st *tfsdk.State, diags *diag.Diagnostics) {
 	k, err := r.api.GetKubernetesCluster(ctx, id)
 	if err != nil {
@@ -512,7 +527,7 @@ func (r *Resource) refresh(ctx context.Context, prev model, id string, st *tfsdk
 	}
 	m, d := fromAPIResponse(ctx, prev, k)
 	diags.Append(d...)
-	r.fillKubeConfig(ctx, &m, k, diags)
+	r.fillKubeConfig(ctx, prev, &m, k, diags)
 	diags.Append(st.Set(ctx, m)...)
 }
 
@@ -530,17 +545,28 @@ func (r *Resource) refreshOrKeep(ctx context.Context, prev model, id string, st 
 	diags.Append(st.Set(ctx, m)...)
 }
 
-// fillKubeConfig downloads the kubeconfig into m when m holds none and the
-// cluster is running. A failure is a warning, not an error: the cluster is
-// fine, and the next refresh tries again.
-func (r *Resource) fillKubeConfig(ctx context.Context, m *model, k *client.KubernetesCluster, diags *diag.Diagnostics) {
-	if hasKubeConfig(*m) || k.ObservedState != client.KubernetesRunning {
+// fillKubeConfig downloads the kubeconfig into m when the cluster is running
+// and m holds none, or the API server's address differs from prev's, since
+// the old file then points kubectl at the wrong place. A failure is a
+// warning, not an error: the cluster is fine, and the next refresh tries
+// again. After a failed download for a moved address, m keeps prev's address
+// so that the next refresh still sees the move.
+func (r *Resource) fillKubeConfig(ctx context.Context, prev model, m *model, k *client.KubernetesCluster, diags *diag.Diagnostics) {
+	if k.ObservedState != client.KubernetesRunning {
+		return
+	}
+	moved := hasKubeConfig(*m) && apiAddressChanged(prev, *m)
+	if hasKubeConfig(*m) && !moved {
 		return
 	}
 	kc, err := r.api.GetKubeconfig(ctx, k.ID)
 	if err != nil {
-		diags.AddWarning("Kubeconfig not downloaded",
-			"The kubeconfig of Kubernetes cluster "+k.ID+" could not be downloaded, so kube_config is empty. The next refresh tries again. Downloading it needs an API key with the write scope.\n\n"+err.Error())
+		detail := "The kubeconfig of Kubernetes cluster " + k.ID + " could not be downloaded, so kube_config is empty. The next refresh tries again."
+		if moved {
+			detail = "The API server of Kubernetes cluster " + k.ID + " moved, but its new kubeconfig could not be downloaded, so kube_config still holds the old one. The next refresh tries again."
+			m.Endpoint, m.PublicIP, m.PublicPort = prev.Endpoint, prev.PublicIP, prev.PublicPort
+		}
+		diags.AddWarning("Kubeconfig not downloaded", detail+" Downloading it needs an API key with the write scope.\n\n"+err.Error())
 		return
 	}
 	m.KubeConfig = types.StringValue(kc)
@@ -561,8 +587,19 @@ func (r *Resource) settledCheck(id, opID string) client.DoneCheck {
 		if k.ObservedState == client.KubernetesFailed {
 			return false, r.failedError(ctx, k, opID)
 		}
-		return k.ObservedState == client.KubernetesRunning && k.InSync && k.DesiredState == client.KubernetesRunning, nil
+		return k.ObservedState == client.KubernetesRunning && k.InSync && k.DesiredState == client.KubernetesRunning && publiclyRouted(k), nil
 	}
+}
+
+// publiclyRouted reports whether a public or dual cluster in a VPC zone has
+// its public address yet; a private cluster, or one in a standard zone, needs
+// none. Without it the apply would finish with public_ip null and a
+// kubeconfig that kubectl cannot use from outside.
+func publiclyRouted(k *client.KubernetesCluster) bool {
+	if k.SubnetID == nil || k.EndpointAccess == "" || k.EndpointAccess == "private" {
+		return true
+	}
+	return k.PublicIP != nil && k.PublicPort != nil
 }
 
 // goneCheck finishes a delete once the cluster is gone or out of service.
@@ -690,6 +727,7 @@ var updateHints = map[string]string{
 	client.CodeKubernetesClusterNotRunning:    "Scaling, autoscaling, allow-list changes and upgrades need a running cluster. Start it from the console or the API, then run `terraform apply` again.",
 	client.CodeKubernetesClusterBusy:          "The cluster is already changing. Wait until it is running again, then run `terraform apply` again.",
 	client.CodeKubernetesClusterNotChangeable: "The cluster is stopped, being deleted, or failed, so it cannot be changed. Start a stopped cluster first, or replace a failed one with `terraform apply -replace`.",
+	client.CodeKubernetesNetworkNotChangeable: "This cluster's cni_plugin, pod_cidr and service_cidr were fixed when it was created. Set them back to the values in state, or replace the cluster with `terraform apply -replace`.",
 	client.CodeInsufficientCredit:             "Your credit does not cover the added workers (with autoscaling, a max_workers above today's count is checked as if every worker ran). Top up or add a card, then run `terraform apply` again.",
 }
 
@@ -706,4 +744,6 @@ var fieldHints = map[string]string{
 	client.CodeInvalidKubernetesAutoscaling: "Set min_workers and max_workers between 1 and 10, with min_workers no more than max_workers, and leave workers out while autoscaling is enabled: the autoscaler sets it.",
 	client.CodeInvalidAPIAllowedCIDRs:       "Use at most 20 IPv4 CIDRs with their host bits clear, for example \"203.0.113.0/24\".",
 	client.CodeAPIAllowedCIDRsVPCOnly:       "The API server allow-list is offered only for clusters in a VPC zone (with subnet_id). Remove api_allowed_cidrs for a cluster in a standard zone.",
+	client.CodeKubernetesPodCIDROverlap:     "pod_cidr overlaps the cluster's VPC network, its subnet or service_cidr, so pods could not reach the nodes. Choose a range clear of all three, or leave pod_cidr unset and the platform picks one.",
+	client.CodeKubernetesServiceCIDROverlap: "service_cidr overlaps the cluster's VPC network, its subnet or pod_cidr. Choose a range clear of all three, or leave service_cidr unset and the platform picks one.",
 }
