@@ -97,7 +97,7 @@ func (c *Client) pollUntil(ctx context.Context, what string, check pollCheck) er
 		done, status, err := check(ctx)
 		switch {
 		case err != nil && ctx.Err() == nil && isTransient(err):
-			lastTransient, done = err, false
+			lastTransient = err
 		case err != nil && ctx.Err() != nil && lastTransient != nil:
 			return fmt.Errorf("waiting for %s (last error: %v): %w", what, lastTransient, err)
 		case err != nil || done:
