@@ -4,10 +4,12 @@
 
 FEATURES:
 
+- `pantechdynamics_kubernetes_cluster`: new read-only `node_health_reason`, set with `node_health = "degraded"` when the cluster itself is the cause: its `pod_cidr` or `service_cidr` overlaps the network its nodes are on (possible only for a cluster created before such ranges were refused). The fix is a new cluster.
 - `pantechdynamics_kubernetes_cluster`: new read-only `node_health` (`healthy`, `degraded` or `unknown`; null while the cluster is not running), `ready_nodes` and `nodes_checked_at`, what Kubernetes last reported of the nodes. A cluster with a NotReady node still reports `observed_state = "running"`; `node_health` shows it.
 
 BREAKING CHANGES:
 
+- `pantechdynamics_kubernetes_cluster`: changing `node_plan` now **replaces** the cluster. The platform fixes a cluster's node plan when it is created and refuses a change (`KUBERNETES_NODE_PLAN_NOT_CHANGEABLE`). The plan said "update in-place", and the old in-place change reported success while the nodes kept their size. For bigger nodes in a running cluster, add a `pantechdynamics_kubernetes_node_pool` on that plan. After an import, setting `node_plan` still changes nothing.
 - `pantechdynamics_kubernetes_cluster`: changing `cni_plugin`, `pod_cidr` or `service_cidr` now **replaces** the cluster. The platform fixes the pod network of a cluster when it is created and refuses the change (`KUBERNETES_NETWORK_NOT_CHANGEABLE`); the plan said "update in-place" before. Left unset, `pod_cidr` and `service_cidr` are now chosen clear of the cluster's VPC network and subnet, and a range that overlaps them is refused at create with `KUBERNETES_POD_CIDR_OVERLAP` or `KUBERNETES_SERVICE_CIDR_OVERLAP` on that attribute. Existing clusters keep the ranges in their state.
 
 BUG FIXES:

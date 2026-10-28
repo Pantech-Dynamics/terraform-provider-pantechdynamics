@@ -252,3 +252,23 @@ func networkFixedAtCreation() planmodifier.String {
 		"Changing it replaces an appliance cluster, whose pod network is fixed at creation.",
 	)
 }
+
+// nodePlanFixedAtCreation replaces an appliance cluster when node_plan
+// changes: the platform refuses the change (its nodes keep the size they
+// were built with), so an in-place update could only fail. A state with
+// no node_plan (after an import, the API reports only node_plan_id) is
+// filled in, never a replacement.
+func nodePlanFixedAtCreation() planmodifier.String {
+	return stringplanmodifier.RequiresReplaceIf(
+		func(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+			if req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.StateValue.ValueString() == "" {
+				return
+			}
+			var kind types.String
+			resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("kind"), &kind)...)
+			resp.RequiresReplace = kind.IsNull() || kind.IsUnknown() || kind.ValueString() == "appliance"
+		},
+		"Changing it replaces an appliance cluster, whose node plan is fixed at creation.",
+		"Changing it replaces an appliance cluster, whose node plan is fixed at creation.",
+	)
+}

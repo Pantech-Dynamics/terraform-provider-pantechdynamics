@@ -88,7 +88,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	fixedNetwork := []planmodifier.String{stringplanmodifier.UseStateForUnknown(), networkFixedAtCreation()}
 	resp.Schema = schema.Schema{
-		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down), and clusters that keep the version they were created with offer none; node_plan changes in place by moving every node to the new plan; endpoint_access changes in place. cni_plugin, pod_cidr and service_cidr are fixed when an appliance cluster is created, so changing them replaces it. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later. Its subnet stays in use until the nodes are removed in the background, so a pantechdynamics_subnet destroyed in the same run waits for that.",
+		Description: "A managed Kubernetes cluster. Every node, control and worker, is a VM of node_plan in your account and is billed as one; there is no separate control-plane fee. Storage used by persistent volume claims (volume_storage_gb) is billed with the nodes' disks. workers, autoscaling and api_allowed_cidrs change in place with one PATCH; kubernetes_version_id changes in place to one of available_upgrade_ids (upgrade, never down), and clusters that keep the version they were created with offer none; node_plan is fixed at creation, so changing it replaces the cluster; endpoint_access changes in place. cni_plugin, pod_cidr and service_cidr are fixed when an appliance cluster is created, so changing them replaces it. Set either workers (a fixed count) or autoscaling (a range the cluster autoscaler moves the count within), not both. Changing name, zone_id, subnet_id or control_nodes replaces the cluster. A cluster that does not fit your account's limits fails with PROVISIONING_LIMIT_EXCEEDED before anything is created. Destroying it stops it at once and its nodes, disks and persistent volumes are destroyed 12 hours later. Its subnet stays in use until the nodes are removed in the background, so a pantechdynamics_subnet destroyed in the same run waits for that.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the cluster, starting with k8s_.",
@@ -118,8 +118,9 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IDPrefix("subnet", "snet_")},
 			},
 			"node_plan": schema.StringAttribute{
-				Description: "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Changes in place: every node, control and worker, is replaced one at a time with a node of the new plan, and the cluster must be running. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.",
-				Required:    true,
+				Description:   "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Fixed when the cluster is created: its nodes keep the size they were built with, so changing it replaces the cluster (a new cluster, new nodes and a new kubeconfig; workloads are not moved). For bigger nodes in a running cluster, add a pantechdynamics_kubernetes_node_pool on that plan instead. The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.",
+				Required:      true,
+				PlanModifiers: []planmodifier.String{nodePlanFixedAtCreation()},
 			},
 			"control_nodes": schema.Int64Attribute{
 				Description:   "Control plane nodes: 1 (the default), or 3 for a highly available control plane where the zone offers one (see ha_zone_ids on the pantechdynamics_kubernetes_versions data source). Changing it replaces the cluster.",
@@ -251,7 +252,11 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Computed:    true,
 			},
 			"node_health": schema.StringAttribute{
-				Description: "What Kubernetes last reported of the nodes while the cluster runs: \"healthy\" (every node Ready), \"degraded\" (a node is NotReady, or fewer are Ready than the cluster should run) or \"unknown\" (the nodes could not be read in the last 15 minutes, for example a private endpoint whose agent is not connected). Read about every 5 minutes; null while the cluster is not running. A degraded cluster still reports observed_state \"running\".",
+				Description: "What Kubernetes last reported of the nodes while the cluster runs: \"healthy\" (every node Ready), \"degraded\" (a node is NotReady, or fewer are Ready than the cluster should run) or \"unknown\" (the nodes could not be read in the last 15 minutes, for example a private endpoint whose agent is not connected). Read about every 5 minutes; null while the cluster is not running. A degraded cluster still reports observed_state \"running\". Always \"degraded\", with node_health_reason, while the cluster's pod_cidr or service_cidr overlaps its own network.",
+				Computed:    true,
+			},
+			"node_health_reason": schema.StringAttribute{
+				Description: "Why node_health is \"degraded\" when the cluster itself is the cause rather than a node's last reading: its pod_cidr or service_cidr overlaps the network its nodes are on (possible only for a cluster created before such ranges were refused). Those ranges are fixed at creation, so the fix is a new cluster. Null otherwise.",
 				Computed:    true,
 			},
 			"ready_nodes": schema.Int64Attribute{
@@ -723,13 +728,14 @@ var createHints = map[string]string{
 
 // updateHints explain the scale, upgrade and delete refusals a user can act on.
 var updateHints = map[string]string{
-	client.CodeKubernetesUnavailable:          hintUnavailable,
-	client.CodeKubernetesClusterNotRunning:    "Scaling, autoscaling, allow-list changes and upgrades need a running cluster. Start it from the console or the API, then run `terraform apply` again.",
-	client.CodeKubernetesClusterBusy:          "The cluster is already changing. Wait until it is running again, then run `terraform apply` again.",
-	client.CodeKubernetesClusterNotChangeable: "The cluster is stopped, being deleted, or failed, so it cannot be changed. Start a stopped cluster first, or replace a failed one with `terraform apply -replace`.",
-	client.CodeKubernetesNetworkNotChangeable: "This cluster's cni_plugin, pod_cidr and service_cidr were fixed when it was created. Set them back to the values in state, or replace the cluster with `terraform apply -replace`.",
-	client.CodeKubernetesUpgradeNotAvailable:  "This cluster runs the Kubernetes version it was created with and cannot be upgraded in place (available_upgrade_ids is empty). Set kubernetes_version_id back to the value in state, or create a new cluster on the version you need and move your workloads to it.",
-	client.CodeInsufficientCredit:             "Your credit does not cover the added workers (with autoscaling, a max_workers above today's count is checked as if every worker ran). Top up or add a card, then run `terraform apply` again.",
+	client.CodeKubernetesUnavailable:           hintUnavailable,
+	client.CodeKubernetesClusterNotRunning:     "Scaling, autoscaling, allow-list changes and upgrades need a running cluster. Start it from the console or the API, then run `terraform apply` again.",
+	client.CodeKubernetesClusterBusy:           "The cluster is already changing. Wait until it is running again, then run `terraform apply` again.",
+	client.CodeKubernetesClusterNotChangeable:  "The cluster is stopped, being deleted, or failed, so it cannot be changed. Start a stopped cluster first, or replace a failed one with `terraform apply -replace`.",
+	client.CodeKubernetesNetworkNotChangeable:  "This cluster's cni_plugin, pod_cidr and service_cidr were fixed when it was created. Set them back to the values in state, or replace the cluster with `terraform apply -replace`.",
+	client.CodeKubernetesNodePlanNotChangeable: "This cluster's node_plan was fixed when it was created; its nodes keep their size. Set node_plan back to the value in state, add a pantechdynamics_kubernetes_node_pool on the plan you need, or replace the cluster with `terraform apply -replace`.",
+	client.CodeKubernetesUpgradeNotAvailable:   "This cluster runs the Kubernetes version it was created with and cannot be upgraded in place (available_upgrade_ids is empty). Set kubernetes_version_id back to the value in state, or create a new cluster on the version you need and move your workloads to it.",
+	client.CodeInsufficientCredit:              "Your credit does not cover the added workers (with autoscaling, a max_workers above today's count is checked as if every worker ran). Top up or add a card, then run `terraform apply` again.",
 }
 
 // fieldHints explain the 422 field codes a user can act on.
