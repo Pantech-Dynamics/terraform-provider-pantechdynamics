@@ -126,7 +126,9 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, opts 
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	if res.status < 200 || res.status > 299 {
-		return newAPIError(res.status, res.body)
+		apiErr := newAPIError(res.status, res.body)
+		apiErr.RetryAfter = parseRetryAfter(res.header.Get("Retry-After"))
+		return apiErr
 	}
 	return decodeBody(res.body, out)
 }

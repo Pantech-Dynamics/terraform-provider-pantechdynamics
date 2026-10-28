@@ -105,13 +105,25 @@ func (c *Client) pollUntil(ctx context.Context, what string, check pollCheck) er
 		default:
 			lastTransient = nil
 		}
-		if err := c.retry.sleep(ctx, c.pollInterval); err != nil {
+		if err := c.retry.sleep(ctx, pollDelay(c.pollInterval, lastTransient)); err != nil {
 			if lastTransient != nil {
 				return fmt.Errorf("waiting for %s (last status %q, last error: %v): %w", what, status, lastTransient, err)
 			}
 			return fmt.Errorf("waiting for %s (last status %q): %w", what, status, err)
 		}
 	}
+}
+
+// pollDelay is the pause before the next check: the poll interval, or the
+// server's Retry-After when the last check was asked to wait longer
+// (capped like a request retry). The sleep itself ends with ctx, so a
+// long Retry-After never outlasts the resource's timeout.
+func pollDelay(interval time.Duration, lastTransient error) time.Duration {
+	var apiErr *APIError
+	if errors.As(lastTransient, &apiErr) && apiErr.RetryAfter > interval {
+		return min(apiErr.RetryAfter, maxRetryAfter)
+	}
+	return interval
 }
 
 // isTransient reports an error a poll can wait out: the API asked the

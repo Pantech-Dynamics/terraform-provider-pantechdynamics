@@ -265,3 +265,40 @@ func TestWaitForOperationStopsOnPermanentErrors(t *testing.T) {
 		t.Fatalf("err = %v after %d calls, want FORBIDDEN after 1", err, calls)
 	}
 }
+
+// A wait asked to slow down waits as long as the server says before its
+// next check (Retry-After), not just the poll interval.
+func TestWaitForOperationHonorsRetryAfter(t *testing.T) {
+	calls := 0
+	c, waits := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls <= 3 { // one check's worth of client retries
+			w.Header().Set("Retry-After", "20")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":503,"code":"PROVISIONING_UNAVAILABLE","request_id":"req_1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(opJSON("succeeded", "null")))
+	})
+	if err := c.WaitForOperation(context.Background(), "op_1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := *waits; len(got) != 3 || got[2] != 20*time.Second {
+		t.Fatalf("waits = %v, want the poll to wait the 20s Retry-After", got)
+	}
+}
+
+// A Retry-After longer than the cap waits the cap, and a check that
+// answers goes back to the poll interval.
+func TestPollDelay(t *testing.T) {
+	slow := &APIError{Status: http.StatusServiceUnavailable, RetryAfter: 10 * time.Minute}
+	if got := pollDelay(2*time.Second, slow); got != maxRetryAfter {
+		t.Fatalf("capped = %v", got)
+	}
+	if got := pollDelay(2*time.Second, nil); got != 2*time.Second {
+		t.Fatalf("no error = %v", got)
+	}
+	if got := pollDelay(5*time.Second, &APIError{RetryAfter: time.Second}); got != 5*time.Second {
+		t.Fatalf("shorter Retry-After = %v", got)
+	}
+}
