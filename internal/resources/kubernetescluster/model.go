@@ -31,6 +31,7 @@ type model struct {
 	ObservedState       types.String   `tfsdk:"observed_state"`
 	InSync              types.Bool     `tfsdk:"in_sync"`
 	NodeHealth          types.String   `tfsdk:"node_health"`
+	NodeHealthReason    types.String   `tfsdk:"node_health_reason"`
 	ReadyNodes          types.Int64    `tfsdk:"ready_nodes"`
 	NodesCheckedAt      types.String   `tfsdk:"nodes_checked_at"`
 	AvailableUpgradeIDs types.List     `tfsdk:"available_upgrade_ids"`
@@ -274,6 +275,7 @@ func fromAPIResponse(ctx context.Context, prev model, k *client.KubernetesCluste
 		ObservedState:       types.StringValue(k.ObservedState),
 		InSync:              types.BoolValue(k.InSync),
 		NodeHealth:          resourcekit.OptionalString(k.NodeHealth),
+		NodeHealthReason:    resourcekit.OptionalString(k.NodeHealthReason),
 		ReadyNodes:          resourcekit.OptionalInt64(k.ReadyNodes),
 		NodesCheckedAt:      resourcekit.Timestamp(k.NodesCheckedAt),
 		AvailableUpgradeIDs: upgrades,
@@ -313,6 +315,7 @@ func pendingModel(plan model, id string) model {
 	m.ObservedState = types.StringNull()
 	m.InSync = types.BoolNull()
 	m.NodeHealth = types.StringNull()
+	m.NodeHealthReason = types.StringNull()
 	m.ReadyNodes = types.Int64Null()
 	m.NodesCheckedAt = types.StringNull()
 	m.AvailableUpgradeIDs = types.ListNull(types.StringType)

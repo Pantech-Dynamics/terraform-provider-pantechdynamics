@@ -275,3 +275,49 @@ func TestUpgradeRefusalExplainsTheVersionIsFixed(t *testing.T) {
 		t.Fatalf("diagnostics = %v", resp.Diagnostics)
 	}
 }
+
+// An appliance cluster's node plan is fixed at creation: changing node_plan
+// plans a replacement, never the in-place change the platform refuses. A
+// state without node_plan (after an import) is filled in, not replaced.
+func TestNodePlanChangeReplacesAnApplianceCluster(t *testing.T) {
+	s := testSchema(t)
+	for name, tc := range map[string]struct {
+		kind  string
+		state types.String
+		want  bool
+	}{
+		"appliance":    {"appliance", types.StringValue("developer"), true},
+		"other kind":   {"other", types.StringValue("developer"), false},
+		"after import": {"appliance", types.StringNull(), false},
+	} {
+		st := withNetwork()
+		st["kind"] = Str(tc.kind)
+		pl := withNetwork()
+		pl["kind"], pl["node_plan"] = Str(tc.kind), Str("performance")
+		req := planmodifier.StringRequest{
+			Path: path.Root("node_plan"), State: State(s, st), Plan: Plan(s, pl),
+			StateValue: tc.state, PlanValue: types.StringValue("performance"), ConfigValue: types.StringValue("performance"),
+		}
+		resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+		nodePlanFixedAtCreation().PlanModifyString(Ctx, req, resp)
+		if resp.Diagnostics.HasError() || resp.RequiresReplace != tc.want {
+			t.Errorf("%s: requires replace = %v, want %v (%v)", name, resp.RequiresReplace, tc.want, resp.Diagnostics)
+		}
+	}
+}
+
+func TestReadReportsNodeHealthReason(t *testing.T) {
+	s := testSchema(t)
+	api := seeded()
+	ready := int64(2)
+	api.clusters[0].NodeHealth, api.clusters[0].ReadyNodes, api.clusters[0].NodesCheckedAt = ptr("degraded"), &ready, now()
+	api.clusters[0].NodeHealthReason = ptr("The cluster's pod range (pod_cidr) overlaps its own network")
+	resp := &resource.ReadResponse{State: stateFor(s)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: stateFor(s)}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if m := getModel(t, resp.State); m.NodeHealth.ValueString() != "degraded" || !strings.Contains(m.NodeHealthReason.ValueString(), "pod_cidr") {
+		t.Errorf("node health = %v, reason %v", m.NodeHealth, m.NodeHealthReason)
+	}
+}

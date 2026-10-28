@@ -55,6 +55,10 @@ const (
 	// CodeKubernetesUpgradeNotAvailable refuses an upgrade of a cluster that
 	// runs the version it was created with.
 	CodeKubernetesUpgradeNotAvailable = "KUBERNETES_UPGRADE_NOT_AVAILABLE"
+
+	// CodeKubernetesNodePlanNotChangeable refuses a node_plan change on a
+	// cluster whose node plan is fixed at creation.
+	CodeKubernetesNodePlanNotChangeable = "KUBERNETES_NODE_PLAN_NOT_CHANGEABLE"
 )
 
 // Field codes a 422 from the Kubernetes endpoints carries in its errors list.
@@ -161,11 +165,14 @@ type KubernetesCluster struct {
 	// NodeHealth is what Kubernetes last reported of the nodes while the
 	// cluster runs: healthy, degraded or unknown; nil while it is not running.
 	// ReadyNodes is nil when NodeHealth is unknown or nil.
-	NodeHealth     *string    `json:"node_health"`
-	ReadyNodes     *int64     `json:"ready_nodes"`
-	NodesCheckedAt *time.Time `json:"nodes_checked_at"`
-	CreatedAt      *time.Time `json:"created_at"`
-	UpdatedAt      *time.Time `json:"updated_at"`
+	NodeHealth *string `json:"node_health"`
+	// NodeHealthReason says why NodeHealth is degraded when the cluster
+	// itself is the cause (its pod or service range overlaps its network).
+	NodeHealthReason *string    `json:"node_health_reason"`
+	ReadyNodes       *int64     `json:"ready_nodes"`
+	NodesCheckedAt   *time.Time `json:"nodes_checked_at"`
+	CreatedAt        *time.Time `json:"created_at"`
+	UpdatedAt        *time.Time `json:"updated_at"`
 }
 
 // CreateKubernetesClusterRequest creates a cluster. SubnetID is required in a
