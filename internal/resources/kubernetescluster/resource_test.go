@@ -237,6 +237,39 @@ func TestCreateWithoutKubeconfigWarns(t *testing.T) {
 	if m := getModel(t, resp.State); !m.KubeConfig.IsNull() || m.ID.ValueString() != "k8s_1" {
 		t.Errorf("model = %+v", m)
 	}
+	if api.kubeconfigs != 1 {
+		t.Errorf("kubeconfig downloads = %d, want 1: only a kubeconfig that is not ready yet is waited for", api.kubeconfigs)
+	}
+}
+
+// The cluster reads running before its nodes are up, and its kubeconfig
+// needs them: a create waits for it rather than leaving kube_config empty.
+func TestCreateWaitsForTheKubeconfig(t *testing.T) {
+	api := &fakeAPI{kubeconfigUnavailable: 2}
+	resp := create(t, api, args(2))
+	if resp.Diagnostics.HasError() || resp.Diagnostics.WarningsCount() != 0 {
+		t.Fatalf("diagnostics = %v, want none", resp.Diagnostics)
+	}
+	if m := getModel(t, resp.State); m.KubeConfig.ValueString() != testKubeconfig {
+		t.Errorf("kube_config = %q, want the kubeconfig once it was ready", m.KubeConfig.ValueString())
+	}
+	if api.kubeconfigs != 3 {
+		t.Errorf("kubeconfig downloads = %d, want 3", api.kubeconfigs)
+	}
+}
+
+// A refresh does not wait: it warns, and the next one tries again.
+func TestReadDoesNotWaitForTheKubeconfig(t *testing.T) {
+	s := testSchema(t)
+	api := seeded()
+	api.kubeconfigUnavailable = 2
+	st := stored()
+	st["kube_config"] = tftypes.NewValue(tftypes.String, nil)
+	resp := &resource.ReadResponse{State: State(s, st)}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: State(s, st)}, resp)
+	if resp.Diagnostics.HasError() || resp.Diagnostics.WarningsCount() != 1 || api.kubeconfigs != 1 {
+		t.Fatalf("downloads = %d, diagnostics = %v; want one try and a warning", api.kubeconfigs, resp.Diagnostics)
+	}
 }
 
 func TestCreateRefusalsCarryHints(t *testing.T) {

@@ -165,7 +165,7 @@ output "kubeconfig" {
 - `id` (String) Identifier of the cluster, starting with k8s_.
 - `in_sync` (Boolean) False while a scale or upgrade has not finished.
 - `kind` (String) How the platform runs the cluster, for example "appliance".
-- `kube_config` (String, Sensitive) The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key), and again when the state holds none or the API server's address (endpoint, public_ip or public_port) changed.
+- `kube_config` (String, Sensitive) The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key; an apply waits until it is ready, since that is a few minutes after the cluster first reads running), and again when the state holds none or the API server's address (endpoint, public_ip or public_port) changed, as switching endpoint_access between private and public does.
 - `kubernetes_version` (String) The Kubernetes version the cluster runs, for example "1.31.2".
 - `network_id` (String) Id of the VPC network the nodes are in. Null in a standard zone.
 - `node` (Attributes) Size of every node, from node_plan. (see [below for nested schema](#nestedatt--node))

@@ -273,7 +273,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Computed:    true,
 			},
 			"kube_config": schema.StringAttribute{
-				Description:   "The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key), and again when the state holds none or the API server's address (endpoint, public_ip or public_port) changed.",
+				Description:   "The cluster's admin kubeconfig file (YAML), for kubectl. It holds a long-lived cluster-admin credential: treat it, and the Terraform state that stores it, like a password. It is downloaded once the cluster is running (which needs a write API key; an apply waits until it is ready, since that is a few minutes after the cluster first reads running), and again when the state holds none or the API server's address (endpoint, public_ip or public_port) changed, as switching endpoint_access between private and public does.",
 				Computed:      true,
 				Sensitive:     true,
 				PlanModifiers: keep,
@@ -318,6 +318,7 @@ func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReques
 	checkUpgrade(ctx, req, resp)
 	planWorkers(ctx, req, resp)
 	planNodeResize(ctx, req, resp)
+	planEndpointMove(ctx, req, resp)
 }
 
 // Create orders the cluster, saves its id straight away, waits until it is
@@ -376,7 +377,7 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 	}
 	m, diags := fromAPIResponse(ctx, state, k)
 	resp.Diagnostics.Append(diags...)
-	r.fillKubeConfig(ctx, state, &m, k, &resp.Diagnostics)
+	r.fillKubeConfig(ctx, state, &m, k, false, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, m)...)
 }
 
@@ -532,7 +533,7 @@ func (r *Resource) refresh(ctx context.Context, prev model, id string, st *tfsdk
 	}
 	m, d := fromAPIResponse(ctx, prev, k)
 	diags.Append(d...)
-	r.fillKubeConfig(ctx, prev, &m, k, diags)
+	r.fillKubeConfig(ctx, prev, &m, k, true, diags)
 	diags.Append(st.Set(ctx, m)...)
 }
 
@@ -555,8 +556,11 @@ func (r *Resource) refreshOrKeep(ctx context.Context, prev model, id string, st 
 // the old file then points kubectl at the wrong place. A failure is a
 // warning, not an error: the cluster is fine, and the next refresh tries
 // again. After a failed download for a moved address, m keeps prev's address
-// so that the next refresh still sees the move.
-func (r *Resource) fillKubeConfig(ctx context.Context, prev model, m *model, k *client.KubernetesCluster, diags *diag.Diagnostics) {
+// so that the next refresh still sees the move. With wait (after a create or
+// a change) a kubeconfig that is not ready yet is waited for, within the
+// apply's timeout: the cluster reads running before its nodes are up, and the
+// kubeconfig needs them, so one try left kube_config empty after every create.
+func (r *Resource) fillKubeConfig(ctx context.Context, prev model, m *model, k *client.KubernetesCluster, wait bool, diags *diag.Diagnostics) {
 	if k.ObservedState != client.KubernetesRunning {
 		return
 	}
@@ -564,7 +568,7 @@ func (r *Resource) fillKubeConfig(ctx context.Context, prev model, m *model, k *
 	if hasKubeConfig(*m) && !moved {
 		return
 	}
-	kc, err := r.api.GetKubeconfig(ctx, k.ID)
+	kc, err := r.downloadKubeconfig(ctx, k.ID, wait)
 	if err != nil {
 		detail := "The kubeconfig of Kubernetes cluster " + k.ID + " could not be downloaded, so kube_config is empty. The next refresh tries again."
 		if moved {
@@ -575,6 +579,27 @@ func (r *Resource) fillKubeConfig(ctx context.Context, prev model, m *model, k *
 		return
 	}
 	m.KubeConfig = types.StringValue(kc)
+}
+
+// downloadKubeconfig downloads the cluster's kubeconfig. With wait, a
+// KUBECONFIG_UNAVAILABLE answer is retried until it is ready or ctx ends; any
+// other error ends it at once.
+func (r *Resource) downloadKubeconfig(ctx context.Context, id string, wait bool) (string, error) {
+	kc, err := r.api.GetKubeconfig(ctx, id)
+	if !wait || !client.HasCode(err, client.CodeKubeconfigUnavailable) {
+		return kc, err
+	}
+	waitErr := r.api.WaitUntil(ctx, "the kubeconfig of Kubernetes cluster "+id, func(ctx context.Context) (bool, error) {
+		kc, err = r.api.GetKubeconfig(ctx, id)
+		if client.HasCode(err, client.CodeKubeconfigUnavailable) {
+			return false, nil
+		}
+		return err == nil, err
+	})
+	if waitErr != nil {
+		return "", waitErr
+	}
+	return kc, nil
 }
 
 // settledCheck finishes a wait once the cluster is running, in sync and meant
