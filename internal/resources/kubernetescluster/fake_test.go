@@ -22,6 +22,7 @@ type fakeAPI struct {
 	opStuck                                                                     bool
 	deleteRemoves                                                               bool // GET answers not found right after a delete, as the API does
 	unrouted                                                                    bool // a public or dual cluster never gets its public address
+	kubeconfigUnavailable                                                       int  // downloads answering KUBECONFIG_UNAVAILABLE before one succeeds
 	op                                                                          *client.Operation
 
 	nextID      int
@@ -239,6 +240,9 @@ func (f *fakeAPI) GetKubeconfig(context.Context, string) (string, error) {
 	if f.kubeconfigErr != nil {
 		return "", f.kubeconfigErr
 	}
+	if f.kubeconfigs <= f.kubeconfigUnavailable {
+		return "", &client.APIError{Status: 409, Code: client.CodeKubeconfigUnavailable}
+	}
 	return testKubeconfig, nil
 }
 
@@ -256,17 +260,20 @@ func (f *fakeAPI) WaitForOperation(ctx context.Context, _ string, done client.Do
 	return kittest.Wait(ctx, done, f.opStuck)
 }
 
-// WaitUntil has no operation to end it, so it fails unless done passes.
+// WaitUntil has no operation to end it: it polls done a few times, as the
+// client does until its timeout, and fails unless done passes.
 func (f *fakeAPI) WaitUntil(ctx context.Context, _ string, done client.DoneCheck) error {
 	if f.waitErr != nil {
 		return f.waitErr
 	}
-	reached, err := done(ctx)
-	if err != nil {
-		return err
+	for range 5 {
+		reached, err := done(ctx)
+		if err != nil {
+			return err
+		}
+		if reached {
+			return nil
+		}
 	}
-	if !reached {
-		return errors.New("the cluster never settled")
-	}
-	return nil
+	return errors.New("the cluster never settled")
 }

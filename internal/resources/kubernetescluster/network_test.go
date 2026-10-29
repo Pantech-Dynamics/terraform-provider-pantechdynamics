@@ -321,3 +321,35 @@ func TestReadReportsNodeHealthReason(t *testing.T) {
 		t.Errorf("node health = %v, reason %v", m.NodeHealth, m.NodeHealthReason)
 	}
 }
+
+// A switch between private and public moves the API server, so its address
+// and the kubeconfig are known after apply; kept from state, Terraform
+// refused the apply as an inconsistent result.
+func TestPlanMarksTheEndpointAndKubeconfigOnAnAccessChange(t *testing.T) {
+	s := testSchema(t)
+	for _, tt := range []struct {
+		name     string
+		from, to string
+		unknown  bool
+	}{
+		{"private to public", "private", "public", true},
+		{"public to private", "public", "private", true},
+		{"unchanged", "public", "public", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			st := stored()
+			st["endpoint_access"] = Str(tt.from)
+			pl := stored()
+			pl["endpoint_access"] = Str(tt.to)
+			plan := Plan(s, pl)
+			resp := &resource.ModifyPlanResponse{Plan: plan}
+			planEndpointMove(Ctx, resource.ModifyPlanRequest{State: State(s, st), Plan: plan}, resp)
+			var endpoint, kubeconfig types.String
+			resp.Diagnostics.Append(resp.Plan.GetAttribute(Ctx, path.Root("endpoint"), &endpoint)...)
+			resp.Diagnostics.Append(resp.Plan.GetAttribute(Ctx, path.Root("kube_config"), &kubeconfig)...)
+			if resp.Diagnostics.HasError() || endpoint.IsUnknown() != tt.unknown || kubeconfig.IsUnknown() != tt.unknown {
+				t.Errorf("endpoint unknown = %v, kube_config unknown = %v, want %v (%v)", endpoint.IsUnknown(), kubeconfig.IsUnknown(), tt.unknown, resp.Diagnostics)
+			}
+		})
+	}
+}

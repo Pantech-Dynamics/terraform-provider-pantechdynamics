@@ -272,3 +272,22 @@ func nodePlanFixedAtCreation() planmodifier.String {
 		"Changing it replaces an appliance cluster, whose node plan is fixed at creation.",
 	)
 }
+
+// planEndpointMove marks the API server's address and the kubeconfig as
+// known after apply when endpoint_access changes: a switch between private
+// and public moves the API server to another address, and its kubeconfig
+// with it. Kept from state, they made Terraform refuse the apply as an
+// inconsistent result, though the switch had worked.
+func planEndpointMove(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var state, plan types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("endpoint_access"), &state)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("endpoint_access"), &plan)...)
+	if resp.Diagnostics.HasError() || plan.Equal(state) {
+		return
+	}
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("endpoint"), types.StringUnknown())...)
+	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("kube_config"), types.StringUnknown())...)
+}
