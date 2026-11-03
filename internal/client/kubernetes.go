@@ -57,8 +57,12 @@ const (
 	CodeKubernetesUpgradeNotAvailable = "KUBERNETES_UPGRADE_NOT_AVAILABLE"
 
 	// CodeKubernetesNodePlanNotChangeable refuses a node_plan change on a
-	// cluster whose node plan is fixed at creation.
+	// cluster whose nodes the platform cannot resize in place.
 	CodeKubernetesNodePlanNotChangeable = "KUBERNETES_NODE_PLAN_NOT_CHANGEABLE"
+
+	// CodeKubernetesNodeDiskShrink refuses a node_plan whose disk is
+	// smaller than the nodes': a node's disk only grows.
+	CodeKubernetesNodeDiskShrink = "KUBERNETES_NODE_DISK_CANNOT_SHRINK"
 )
 
 // Field codes a 422 from the Kubernetes endpoints carries in its errors list.

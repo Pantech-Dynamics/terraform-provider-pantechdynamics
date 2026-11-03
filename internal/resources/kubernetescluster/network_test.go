@@ -276,18 +276,19 @@ func TestUpgradeRefusalExplainsTheVersionIsFixed(t *testing.T) {
 	}
 }
 
-// An appliance cluster's node plan is fixed at creation: changing node_plan
-// plans a replacement, never the in-place change the platform refuses. A
-// state without node_plan (after an import) is filled in, not replaced.
-func TestNodePlanChangeReplacesAnApplianceCluster(t *testing.T) {
+// An appliance cluster resizes its nodes in place, so changing node_plan
+// plans an update; a cluster of another kind, which the platform refuses to
+// resize, is replaced. A state without node_plan (after an import) is
+// filled in, not replaced.
+func TestNodePlanChangeResizesAnApplianceClusterInPlace(t *testing.T) {
 	s := testSchema(t)
 	for name, tc := range map[string]struct {
 		kind  string
 		state types.String
 		want  bool
 	}{
-		"appliance":    {"appliance", types.StringValue("developer"), true},
-		"other kind":   {"other", types.StringValue("developer"), false},
+		"appliance":    {"appliance", types.StringValue("developer"), false},
+		"other kind":   {"managed", types.StringValue("developer"), true},
 		"after import": {"appliance", types.StringNull(), false},
 	} {
 		st := withNetwork()
@@ -299,7 +300,7 @@ func TestNodePlanChangeReplacesAnApplianceCluster(t *testing.T) {
 			StateValue: tc.state, PlanValue: types.StringValue("performance"), ConfigValue: types.StringValue("performance"),
 		}
 		resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
-		nodePlanFixedAtCreation().PlanModifyString(Ctx, req, resp)
+		nodePlanChangeReplaces().PlanModifyString(Ctx, req, resp)
 		if resp.Diagnostics.HasError() || resp.RequiresReplace != tc.want {
 			t.Errorf("%s: requires replace = %v, want %v (%v)", name, resp.RequiresReplace, tc.want, resp.Diagnostics)
 		}
