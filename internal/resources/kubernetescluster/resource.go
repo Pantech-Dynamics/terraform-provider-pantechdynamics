@@ -118,7 +118,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IDPrefix("subnet", "snet_")},
 			},
 			"node_plan": schema.StringAttribute{
-				Description:   "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Changes in place on a running cluster: the control node and default workers move to the new plan one at a time (each worker is drained, each node restarts and the next waits until it is Ready), and the cluster is billed at the new plan once every node runs it. A node's disk only grows, so a plan with a smaller disk is refused. Node pools keep their own plans. Each node can take up to 30 minutes to move, so for a cluster of more than two nodes set timeouts.update above its 60-minute default (for example 30m per node). The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.",
+				Description:   "Slug of the plan every node uses, from the pantechdynamics_plans data source. It needs at least the version's min_cpu and min_memory_mb. Each node is billed as a VM of this plan. Changes in place on a running cluster: the control node and default workers move to the new plan one at a time (each worker is drained, each node restarts and the next waits until it is Ready), and the cluster is billed at the new plan once every node runs it. A smaller plan works too: a node's disk only grows, so the nodes take its vCPU and memory and keep the disk they have (node.disk_gb). Node pools keep their own plans. Each node can take up to 30 minutes to move, so for a cluster of more than two nodes set timeouts.update above its 60-minute default (for example 30m per node). The API reports the plan only by id (node_plan_id), so a change made outside Terraform is not detected, and after an import this holds no value and setting it changes nothing.",
 				Required:      true,
 				PlanModifiers: []planmodifier.String{nodePlanChangeReplaces()},
 			},
@@ -230,7 +230,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: keep,
 			},
 			"node": schema.SingleNestedAttribute{
-				Description:   "Size of every node, from node_plan.",
+				Description:   "Size of every node, from node_plan. After a change to a plan with a smaller disk, disk_gb stays the bigger disk the nodes have.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
 				Attributes: map[string]schema.Attribute{
@@ -759,7 +759,6 @@ var updateHints = map[string]string{
 	client.CodeKubernetesClusterNotChangeable:  "The cluster is stopped, being deleted, or failed, so it cannot be changed. Start a stopped cluster first, or replace a failed one with `terraform apply -replace`.",
 	client.CodeKubernetesNetworkNotChangeable:  "This cluster's cni_plugin, pod_cidr and service_cidr were fixed when it was created. Set them back to the values in state, or replace the cluster with `terraform apply -replace`.",
 	client.CodeKubernetesNodePlanNotChangeable: "This cluster's nodes cannot be resized in place. Set node_plan back to the value in state, add a pantechdynamics_kubernetes_node_pool on the plan you need, or replace the cluster with `terraform apply -replace`.",
-	client.CodeKubernetesNodeDiskShrink:        "A node's disk only grows: choose a node_plan whose disk_gb is at least the current plan's (see pantechdynamics_plans).",
 	client.CodeKubernetesUpgradeNotAvailable:   "This cluster runs the Kubernetes version it was created with and cannot be upgraded in place (available_upgrade_ids is empty). Set kubernetes_version_id back to the value in state, or create a new cluster on the version you need and move your workloads to it.",
 	client.CodeInsufficientCredit:              "Your credit does not cover the added workers (with autoscaling, a max_workers above today's count is checked as if every worker ran). Top up or add a card, then run `terraform apply` again.",
 }

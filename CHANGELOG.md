@@ -4,7 +4,7 @@
 
 FEATURES:
 
-- `pantechdynamics_kubernetes_cluster`: changing `node_plan` resizes an appliance cluster's control node and default workers in place, one node at a time (each worker is drained, each node restarts and the next waits until it is Ready); the update waits until every node runs the new plan, which is when billing moves to it. A plan with a smaller disk is refused with `KUBERNETES_NODE_DISK_CANNOT_SHRINK`. A cluster of another kind is still replaced. After an import, setting `node_plan` still changes nothing.
+- `pantechdynamics_kubernetes_cluster`: changing `node_plan` resizes an appliance cluster's control node and default workers in place, one node at a time (each worker is drained, each node restarts and the next waits until it is Ready); the update waits until every node runs the new plan, which is when billing moves to it. A plan with a smaller disk works too: the nodes take its vCPU and memory and keep the disk they have, shown in `node.disk_gb`. A cluster of another kind is still replaced. After an import, setting `node_plan` still changes nothing.
 - `pantechdynamics_kubernetes_cluster`: new read-only `node_health_reason`, set with `node_health = "degraded"` when the cluster itself is the cause: its `pod_cidr` or `service_cidr` overlaps the network its nodes are on (possible only for a cluster created before such ranges were refused). The fix is a new cluster.
 - `pantechdynamics_kubernetes_cluster`: new read-only `node_health` (`healthy`, `degraded` or `unknown`; null while the cluster is not running), `ready_nodes` and `nodes_checked_at`, what Kubernetes last reported of the nodes. A cluster with a NotReady node still reports `observed_state = "running"`; `node_health` shows it.
 
