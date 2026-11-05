@@ -253,12 +253,13 @@ func networkFixedAtCreation() planmodifier.String {
 	)
 }
 
-// nodePlanFixedAtCreation replaces an appliance cluster when node_plan
-// changes: the platform refuses the change (its nodes keep the size they
-// were built with), so an in-place update could only fail. A state with
-// no node_plan (after an import, the API reports only node_plan_id) is
-// filled in, never a replacement.
-func nodePlanFixedAtCreation() planmodifier.String {
+// nodePlanChangeReplaces replaces a cluster whose nodes the platform does
+// not build when node_plan changes: the platform refuses that change
+// (KUBERNETES_NODE_PLAN_NOT_CHANGEABLE), so an in-place update could only
+// fail. An appliance cluster (the default kind) resizes its nodes in
+// place. A state with no node_plan (after an import, the API reports only
+// node_plan_id) is filled in, never a replacement.
+func nodePlanChangeReplaces() planmodifier.String {
 	return stringplanmodifier.RequiresReplaceIf(
 		func(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
 			if req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.StateValue.ValueString() == "" {
@@ -266,10 +267,10 @@ func nodePlanFixedAtCreation() planmodifier.String {
 			}
 			var kind types.String
 			resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("kind"), &kind)...)
-			resp.RequiresReplace = kind.IsNull() || kind.IsUnknown() || kind.ValueString() == "appliance"
+			resp.RequiresReplace = !kind.IsNull() && !kind.IsUnknown() && kind.ValueString() != "" && kind.ValueString() != "appliance"
 		},
-		"Changing it replaces an appliance cluster, whose node plan is fixed at creation.",
-		"Changing it replaces an appliance cluster, whose node plan is fixed at creation.",
+		"Changing it resizes an appliance cluster's nodes in place, one at a time; it replaces a cluster of another kind.",
+		"Changing it resizes an appliance cluster's nodes in place, one at a time; it replaces a cluster of another kind.",
 	)
 }
 
