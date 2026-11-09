@@ -30,6 +30,8 @@ type scheduleAPI interface {
 	GetVolumeSnapshotSchedule(ctx context.Context, volumeID string) (*client.SnapshotSchedule, error)
 	PutInstanceSnapshotSchedule(ctx context.Context, instanceID string, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error)
 	PutVolumeSnapshotSchedule(ctx context.Context, volumeID string, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error)
+	GetDatabaseSnapshotSchedule(ctx context.Context, databaseID string) (*client.SnapshotSchedule, error)
+	PutDatabaseSnapshotSchedule(ctx context.Context, databaseID string, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error)
 }
 
 var (
@@ -39,7 +41,7 @@ var (
 	_ resource.ResourceWithValidateConfig = &Resource{}
 )
 
-// Resource manages the automatic snapshot schedule of one instance or volume.
+// Resource manages the automatic snapshot schedule of one instance, volume or database.
 type Resource struct {
 	api scheduleAPI
 }
@@ -57,24 +59,30 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 // Schema describes the attributes.
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The automatic snapshot schedule of an instance or a volume. Set exactly one of instance_id and volume_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.",
+		Description: "The automatic snapshot schedule of an instance, a volume or a database. Set exactly one of instance_id, volume_id and database_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description:   "The id of the instance or volume the schedule belongs to.",
+				Description:   "The id of the instance, volume or database the schedule belongs to.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"instance_id": schema.StringAttribute{
-				Description:   "Id of the instance whose root disk is snapshotted, from pantechdynamics_instance. Set this or volume_id. Changing it replaces the schedule.",
+				Description:   "Id of the instance whose root disk is snapshotted, from pantechdynamics_instance. Set exactly one of this, volume_id and database_id. Changing it replaces the schedule.",
 				Optional:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{prefixCheck{prefix: "vm_", kind: "an instance"}},
 			},
 			"volume_id": schema.StringAttribute{
-				Description:   "Id of the volume to snapshot, from pantechdynamics_volume. Set this or instance_id. Changing it replaces the schedule.",
+				Description:   "Id of the volume to snapshot, from pantechdynamics_volume. Set exactly one of this, instance_id and database_id. Changing it replaces the schedule.",
 				Optional:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{prefixCheck{prefix: "vol_", kind: "a volume"}},
+			},
+			"database_id": schema.StringAttribute{
+				Description:   "Id of the database whose data disk is snapshotted, from pantechdynamics_database. Set exactly one of this, instance_id and volume_id. Changing it replaces the schedule.",
+				Optional:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{prefixCheck{prefix: "db_", kind: "a database"}},
 			},
 			"frequency": schema.StringAttribute{
 				Description: "How often a snapshot is taken: \"daily\", \"weekly\" or \"monthly\". Times are in UTC, and monthly dates clamp to the end of the month.",
@@ -119,22 +127,22 @@ func (r *Resource) Configure(_ context.Context, req resource.ConfigureRequest, r
 // ValidateConfig requires exactly one source. An unknown value counts as set, so a
 // reference to a resource that does not exist yet is accepted.
 func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var instanceID, volumeID types.String
+	var instanceID, volumeID, databaseID types.String
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("instance_id"), &instanceID)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("volume_id"), &volumeID)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("database_id"), &databaseID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	set := 0
-	if !instanceID.IsNull() {
-		set++
-	}
-	if !volumeID.IsNull() {
-		set++
+	for _, source := range []types.String{instanceID, volumeID, databaseID} {
+		if !source.IsNull() {
+			set++
+		}
 	}
 	if set != 1 {
-		resp.Diagnostics.AddError("Exactly one source is required", "Set exactly one of instance_id and volume_id.")
+		resp.Diagnostics.AddError("Exactly one source is required", "Set exactly one of instance_id, volume_id and database_id.")
 	}
 }
 
@@ -162,16 +170,7 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 func (r *Resource) put(ctx context.Context, plan model, state interface {
 	Set(context.Context, any) diag.Diagnostics
 }, diags *diag.Diagnostics) {
-	id, isInstance := sourceID(plan)
-	var (
-		sched *client.SnapshotSchedule
-		err   error
-	)
-	if isInstance {
-		sched, err = r.api.PutInstanceSnapshotSchedule(ctx, id, toRequest(plan))
-	} else {
-		sched, err = r.api.PutVolumeSnapshotSchedule(ctx, id, toRequest(plan))
-	}
+	sched, err := r.send(ctx, plan)
 	if err != nil {
 		diags.AddError("Error setting the snapshot schedule", err.Error())
 		return
@@ -201,11 +200,24 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 }
 
 func (r *Resource) get(ctx context.Context, m model) (*client.SnapshotSchedule, error) {
-	id, isInstance := sourceID(m)
-	if isInstance {
-		return r.api.GetInstanceSnapshotSchedule(ctx, id)
+	switch {
+	case isSet(m.InstanceID):
+		return r.api.GetInstanceSnapshotSchedule(ctx, m.InstanceID.ValueString())
+	case isSet(m.DatabaseID):
+		return r.api.GetDatabaseSnapshotSchedule(ctx, m.DatabaseID.ValueString())
 	}
-	return r.api.GetVolumeSnapshotSchedule(ctx, id)
+	return r.api.GetVolumeSnapshotSchedule(ctx, m.VolumeID.ValueString())
+}
+
+// send writes the schedule to whichever source m names.
+func (r *Resource) send(ctx context.Context, m model) (*client.SnapshotSchedule, error) {
+	switch {
+	case isSet(m.InstanceID):
+		return r.api.PutInstanceSnapshotSchedule(ctx, m.InstanceID.ValueString(), toRequest(m))
+	case isSet(m.DatabaseID):
+		return r.api.PutDatabaseSnapshotSchedule(ctx, m.DatabaseID.ValueString(), toRequest(m))
+	}
+	return r.api.PutVolumeSnapshotSchedule(ctx, m.VolumeID.ValueString(), toRequest(m))
 }
 
 // Delete pauses the schedule, because the API has no way to remove one. A source
@@ -229,28 +241,24 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 		return
 	}
 
-	paused := model{InstanceID: state.InstanceID, VolumeID: state.VolumeID,
+	paused := model{InstanceID: state.InstanceID, VolumeID: state.VolumeID, DatabaseID: state.DatabaseID,
 		Frequency: types.StringValue(current.Frequency), RetentionCount: types.Int64Value(current.RetentionCount), Enabled: types.BoolValue(false)}
-	id, isInstance := sourceID(paused)
-	if isInstance {
-		_, err = r.api.PutInstanceSnapshotSchedule(ctx, id, toRequest(paused))
-	} else {
-		_, err = r.api.PutVolumeSnapshotSchedule(ctx, id, toRequest(paused))
-	}
-	if err != nil && !errors.Is(err, client.ErrNotFound) {
+	if _, err = r.send(ctx, paused); err != nil && !errors.Is(err, client.ErrNotFound) {
 		resp.Diagnostics.AddError("Error pausing the snapshot schedule", err.Error())
 	}
 }
 
-// ImportState adopts the schedule of an instance or a volume, by that id.
+// ImportState adopts the schedule of an instance, a volume or a database, by that id.
 func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	switch {
 	case strings.HasPrefix(req.ID, "vm_"):
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("instance_id"), req.ID)...)
 	case strings.HasPrefix(req.ID, "vol_"):
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("volume_id"), req.ID)...)
+	case strings.HasPrefix(req.ID, "db_"):
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("database_id"), req.ID)...)
 	default:
-		resp.Diagnostics.AddError("Invalid id", fmt.Sprintf("Import a schedule by the id of its instance (vm_...) or volume (vol_...), got %q.", req.ID))
+		resp.Diagnostics.AddError("Invalid id", fmt.Sprintf("Import a schedule by the id of its instance (vm_...), volume (vol_...) or database (db_...), got %q.", req.ID))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)

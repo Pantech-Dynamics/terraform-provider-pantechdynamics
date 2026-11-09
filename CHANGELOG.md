@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+FEATURES:
+
+- `pantechdynamics_snapshot_schedule`: new `database_id`, for automatic snapshots of a database's data disk.
+
 ## 0.6.0 (2026-11-06)
 
 FEATURES:

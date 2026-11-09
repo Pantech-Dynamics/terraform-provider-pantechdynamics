@@ -50,10 +50,11 @@ type Snapshot struct {
 	UpdatedAt          *time.Time `json:"updated_at"`
 }
 
-// SnapshotSchedule is the automatic snapshot setting of an instance or a volume.
+// SnapshotSchedule is the automatic snapshot setting of an instance, a volume or a database.
 type SnapshotSchedule struct {
 	InstanceID     *string    `json:"instance_id"`
 	VolumeID       *string    `json:"volume_id"`
+	DatabaseID     *string    `json:"database_id"`
 	Frequency      string     `json:"frequency"`
 	RetentionCount int64      `json:"retention_count"`
 	Enabled        bool       `json:"enabled"`
@@ -149,6 +150,16 @@ func (c *Client) GetInstanceSnapshotSchedule(ctx context.Context, instanceID str
 // GetVolumeSnapshotSchedule returns a volume's schedule, or ErrNotFound when it has none.
 func (c *Client) GetVolumeSnapshotSchedule(ctx context.Context, volumeID string) (*SnapshotSchedule, error) {
 	return c.getSchedule(ctx, volumePath(volumeID)+"/snapshot-schedule")
+}
+
+// GetDatabaseSnapshotSchedule returns a database's schedule, or ErrNotFound when it has none.
+func (c *Client) GetDatabaseSnapshotSchedule(ctx context.Context, databaseID string) (*SnapshotSchedule, error) {
+	return c.getSchedule(ctx, databasePath(databaseID)+"/snapshot-schedule")
+}
+
+// PutDatabaseSnapshotSchedule creates or replaces a database's schedule.
+func (c *Client) PutDatabaseSnapshotSchedule(ctx context.Context, databaseID string, req PutSnapshotScheduleRequest) (*SnapshotSchedule, error) {
+	return c.putSchedule(ctx, databasePath(databaseID)+"/snapshot-schedule", req)
 }
 
 // PutInstanceSnapshotSchedule creates or replaces an instance's schedule. The
