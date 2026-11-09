@@ -3,12 +3,12 @@
 page_title: "pantechdynamics_snapshot_schedule Resource - pantechdynamics"
 subcategory: ""
 description: |-
-  The automatic snapshot schedule of an instance or a volume. Set exactly one of instance_id and volume_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.
+  The automatic snapshot schedule of an instance, a volume or a database. Set exactly one of instance_id, volume_id and database_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.
 ---
 
 # pantechdynamics_snapshot_schedule (Resource)
 
-The automatic snapshot schedule of an instance or a volume. Set exactly one of instance_id and volume_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.
+The automatic snapshot schedule of an instance, a volume or a database. Set exactly one of instance_id, volume_id and database_id. The API cannot delete a schedule, so destroying this resource pauses it (enabled = false) and leaves it on the platform. Creating it again later replaces that paused schedule. Snapshots a schedule makes are billed for storage like any other, and are not managed by Terraform.
 
 ## Example Usage
 
@@ -28,6 +28,13 @@ resource "pantechdynamics_snapshot_schedule" "web" {
   enabled     = true
 }
 
+# The same for a database's data disk. Each copy is crash-consistent.
+resource "pantechdynamics_snapshot_schedule" "app_db" {
+  database_id     = pantechdynamics_database.app.id
+  frequency       = "daily"
+  retention_count = 14
+}
+
 # The API cannot delete a schedule, so destroying one of these pauses it
 # (enabled = false) and leaves it on the platform. The snapshots a schedule makes
 # are not managed by Terraform, and they are billed for storage like any other.
@@ -42,14 +49,15 @@ resource "pantechdynamics_snapshot_schedule" "web" {
 
 ### Optional
 
+- `database_id` (String) Id of the database whose data disk is snapshotted, from pantechdynamics_database. Set exactly one of this, instance_id and volume_id. Changing it replaces the schedule.
 - `enabled` (Boolean) Whether snapshots are taken. Set it to false to pause the schedule. Defaults to true.
-- `instance_id` (String) Id of the instance whose root disk is snapshotted, from pantechdynamics_instance. Set this or volume_id. Changing it replaces the schedule.
+- `instance_id` (String) Id of the instance whose root disk is snapshotted, from pantechdynamics_instance. Set exactly one of this, volume_id and database_id. Changing it replaces the schedule.
 - `retention_count` (Number) How many successful snapshots are kept, from 1 to 168. Older ones are deleted. Defaults to 7.
-- `volume_id` (String) Id of the volume to snapshot, from pantechdynamics_volume. Set this or instance_id. Changing it replaces the schedule.
+- `volume_id` (String) Id of the volume to snapshot, from pantechdynamics_volume. Set exactly one of this, instance_id and database_id. Changing it replaces the schedule.
 
 ### Read-Only
 
-- `id` (String) The id of the instance or volume the schedule belongs to.
+- `id` (String) The id of the instance, volume or database the schedule belongs to.
 - `next_run_at` (String) When the next snapshot is due, in RFC 3339 UTC, to the second. The platform moves it as the schedule runs.
 
 ## Import
@@ -59,7 +67,8 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# A schedule is imported by the id of the instance or volume it belongs to.
+# A schedule is imported by the id of the instance, volume or database it belongs to.
 terraform import pantechdynamics_snapshot_schedule.data vol_06gge7avbst1z09taja09tkkeg
 terraform import pantechdynamics_snapshot_schedule.web vm_06gge49p4ss4f1qkg5tewd0c2m
+terraform import pantechdynamics_snapshot_schedule.app_db db_06gw2qnt5hwesa1edsp392znnm
 ```
