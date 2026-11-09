@@ -13,6 +13,13 @@ resource "pantechdynamics_snapshot_schedule" "web" {
   enabled     = true
 }
 
+# The same for a database's data disk. Each copy is crash-consistent.
+resource "pantechdynamics_snapshot_schedule" "app_db" {
+  database_id     = pantechdynamics_database.app.id
+  frequency       = "daily"
+  retention_count = 14
+}
+
 # The API cannot delete a schedule, so destroying one of these pauses it
 # (enabled = false) and leaves it on the platform. The snapshots a schedule makes
 # are not managed by Terraform, and they are billed for storage like any other.

@@ -44,17 +44,23 @@ func (f *fakeAPI) get(id string) (*client.SnapshotSchedule, error) {
 }
 
 func (f *fakeAPI) put(id string, isInstance bool, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error) {
+	return f.save(id, func(s *client.SnapshotSchedule) {
+		if isInstance {
+			s.InstanceID = ptr(id)
+		} else {
+			s.VolumeID = ptr(id)
+		}
+	}, req)
+}
+
+func (f *fakeAPI) save(id string, source func(*client.SnapshotSchedule), req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error) {
 	f.puts = append(f.puts, req)
 	if f.putErr != nil {
 		return nil, f.putErr
 	}
 	next := time.Date(2026, 10, 4, 13, 27, 30, 0, time.UTC)
 	s := client.SnapshotSchedule{Frequency: req.Frequency, RetentionCount: req.RetentionCount, Enabled: req.Enabled, NextRunAt: &next}
-	if isInstance {
-		s.InstanceID = ptr(id)
-	} else {
-		s.VolumeID = ptr(id)
-	}
+	source(&s)
 	f.schedules[id] = s
 	return &s, nil
 }
@@ -73,6 +79,14 @@ func (f *fakeAPI) PutInstanceSnapshotSchedule(_ context.Context, id string, req 
 
 func (f *fakeAPI) PutVolumeSnapshotSchedule(_ context.Context, id string, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error) {
 	return f.put(id, false, req)
+}
+
+func (f *fakeAPI) GetDatabaseSnapshotSchedule(_ context.Context, id string) (*client.SnapshotSchedule, error) {
+	return f.get(id)
+}
+
+func (f *fakeAPI) PutDatabaseSnapshotSchedule(_ context.Context, id string, req client.PutSnapshotScheduleRequest) (*client.SnapshotSchedule, error) {
+	return f.save(id, func(s *client.SnapshotSchedule) { s.DatabaseID = ptr(id) }, req)
 }
 
 // --- helpers ---
@@ -205,6 +219,8 @@ func TestValidateConfigNeedsExactlyOneSource(t *testing.T) {
 	}{
 		{"an instance", map[string]tftypes.Value{"instance_id": str("vm_1")}, false},
 		{"a volume", map[string]tftypes.Value{"volume_id": str("vol_1")}, false},
+		{"a database", map[string]tftypes.Value{"database_id": str("db_1")}, false},
+		{"a volume and a database", map[string]tftypes.Value{"volume_id": str("vol_1"), "database_id": str("db_1")}, true},
 		{"neither", nil, true},
 		{"both", map[string]tftypes.Value{"instance_id": str("vm_1"), "volume_id": str("vol_1")}, true},
 		{"unknown counts as set", map[string]tftypes.Value{"volume_id": unknownStr()}, false},
@@ -281,6 +297,21 @@ func TestCreate(t *testing.T) {
 		m := getModel(t, resp.State)
 		if m.ID.ValueString() != "vm_1" || m.InstanceID.ValueString() != "vm_1" || !m.VolumeID.IsNull() || m.NextRunAt.ValueString() != "2026-10-04T13:27:30Z" {
 			t.Fatalf("state = %+v", m)
+		}
+	})
+
+	t.Run("a database schedule", func(t *testing.T) {
+		api := newFake()
+		resp := create(api, map[string]tftypes.Value{"instance_id": tftypes.NewValue(tftypes.String, nil), "database_id": str("db_1"), "frequency": str("daily"), "retention_count": num(3), "enabled": flag(true)})
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("diags = %s", errorText(resp.Diagnostics))
+		}
+		m := getModel(t, resp.State)
+		if m.ID.ValueString() != "db_1" || m.DatabaseID.ValueString() != "db_1" || !m.InstanceID.IsNull() || !m.VolumeID.IsNull() {
+			t.Fatalf("state = %+v", m)
+		}
+		if api.schedules["db_1"].DatabaseID == nil {
+			t.Fatalf("the schedule was not sent to the database: %+v", api.schedules)
 		}
 	})
 
@@ -409,6 +440,7 @@ func TestImportState(t *testing.T) {
 	}{
 		{"an instance", "vm_1", false, true},
 		{"a volume", "vol_1", false, false},
+		{"a database", "db_1", false, false},
 		{"another kind of id", "snap_1", true, false},
 		{"empty", "", true, false},
 	} {
@@ -422,7 +454,7 @@ func TestImportState(t *testing.T) {
 				return
 			}
 			m := getModel(t, resp.State)
-			if m.ID.ValueString() != tt.id || m.InstanceID.IsNull() == tt.wantInstance || m.VolumeID.IsNull() != tt.wantInstance {
+			if m.ID.ValueString() != tt.id || m.InstanceID.IsNull() == tt.wantInstance || (tt.id == "vol_1") == m.VolumeID.IsNull() || (tt.id == "db_1") == m.DatabaseID.IsNull() {
 				t.Fatalf("state = %+v", m)
 			}
 		})
