@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+BUG FIXES:
+
+- `pantechdynamics_public_ip`: when no public address can be attached, the API now answers `PUBLIC_IP_UNAVAILABLE`; the error says to try again later and keeps the failed address in state so the next apply replaces it (`IP_POOL_EXHAUSTED` from older API versions is handled the same way).
+- `pantechdynamics_network`: the description no longer refers to the platform's address pool.
+
 ## 0.7.0 (2026-11-10)
 
 FEATURES:

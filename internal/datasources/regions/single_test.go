@@ -33,7 +33,7 @@ func readOne(t *testing.T, api regionAPI, code string) datasource.ReadResponse {
 }
 
 func catalog() *fakeAPI {
-	reason := "IP_POOL_EXHAUSTED"
+	reason := "TEMPORARILY_UNAVAILABLE"
 	return &fakeAPI{regions: []client.Region{
 		{Code: "af-abj", Name: "Abuja", Placements: []client.Placement{
 			{Kind: "standard", Zone: "af-abj-1", Available: true},
@@ -67,7 +67,7 @@ func TestSingleReadFindsTheRegionByCode(t *testing.T) {
 	if p := got.Placements[0]; p.Kind.ValueString() != "standard" || !p.Available.ValueBool() || !p.UnavailableReason.IsNull() {
 		t.Errorf("placement 0 = %+v", p)
 	}
-	if p := got.Placements[1]; p.Available.ValueBool() || p.UnavailableReason.ValueString() != "IP_POOL_EXHAUSTED" {
+	if p := got.Placements[1]; p.Available.ValueBool() || p.UnavailableReason.ValueString() != "TEMPORARILY_UNAVAILABLE" {
 		t.Errorf("placement 1 = %+v", p)
 	}
 }

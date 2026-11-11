@@ -108,18 +108,21 @@ func TestCreatePortForwardingHasNoInstance(t *testing.T) {
 	}
 }
 
-func TestCreateFailureKeepsTheIDAndHintsAtAPoolShortage(t *testing.T) {
-	api := &fakeAPI{
-		createState: "failed",
-		op:          &client.Operation{ID: "op_pip_1", Kind: "create_public_ip", Status: client.OperationFailed, Failure: &client.OperationFailure{Code: "IP_POOL_EXHAUSTED", Reason: "no free address"}},
-	}
-	resp := create(t, api, "static_nat", Str("vm_1"))
-	text := ErrorText(resp.Diagnostics)
-	if !strings.Contains(text, "IP_POOL_EXHAUSTED") || !strings.Contains(text, "no free public addresses") {
-		t.Fatalf("diagnostics = %q", text)
-	}
-	if IsRemoved(resp.State) || getModel(t, resp.State).ID.ValueString() != "pip_1" {
-		t.Error("the id was not saved, so the failed address would be orphaned")
+func TestCreateFailureKeepsTheIDAndSaysTryAgain(t *testing.T) {
+	for _, code := range []string{"PUBLIC_IP_UNAVAILABLE", "IP_POOL_EXHAUSTED"} {
+		api := &fakeAPI{
+			createState: "failed",
+			op: &client.Operation{ID: "op_pip_1", Kind: "create_public_ip", Status: client.OperationFailed,
+				Failure: &client.OperationFailure{Code: code, Reason: "There was an error attaching a public IP address to your resource. Please try again later."}},
+		}
+		resp := create(t, api, "static_nat", Str("vm_1"))
+		text := ErrorText(resp.Diagnostics)
+		if !strings.Contains(text, code) || !strings.Contains(text, "Please try again later") {
+			t.Fatalf("%s: diagnostics = %q", code, text)
+		}
+		if IsRemoved(resp.State) || getModel(t, resp.State).ID.ValueString() != "pip_1" {
+			t.Errorf("%s: the id was not saved, so the failed address would be orphaned", code)
+		}
 	}
 }
 

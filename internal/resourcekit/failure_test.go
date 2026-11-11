@@ -27,7 +27,7 @@ func TestFailureCodeHint(t *testing.T) {
 			t.Errorf("FailureCodeHint(%q) = %q, want it to contain %q", tt.code, got, tt.want)
 		}
 	}
-	for _, code := range []string{"", "INSTANCE_BUSY", "IP_POOL_EXHAUSTED"} {
+	for _, code := range []string{"", "INSTANCE_BUSY", "PUBLIC_IP_UNAVAILABLE"} {
 		if got := FailureCodeHint(code); got != "" {
 			t.Errorf("FailureCodeHint(%q) = %q, want none", code, got)
 		}
