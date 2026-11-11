@@ -24,9 +24,10 @@ import (
 const (
 	idPrefix = "pip_"
 
-	// codeIPPoolExhausted is the operation failure when the region ran out of
-	// addresses between the availability check and the request.
-	codeIPPoolExhausted = "IP_POOL_EXHAUSTED"
+	// codePublicIPUnavailable is the operation failure when no public address
+	// could be attached; codeIPPoolExhausted is what older API versions sent.
+	codePublicIPUnavailable = "PUBLIC_IP_UNAVAILABLE"
+	codeIPPoolExhausted     = "IP_POOL_EXHAUSTED"
 
 	// stateSyncing stands in for "active" while an attach or detach has not
 	// reached the address yet (in_sync false), or it does not point where it
@@ -415,11 +416,12 @@ func addCreateError(diags *diag.Diagnostics, err error) {
 	resourcekit.AddHintedAPIError(diags, "Error creating public IP", err, attributeFor, createHints)
 }
 
-// addCreateWaitError adds a hint when the region ran out of addresses.
+// addCreateWaitError adds a hint when no public address could be attached.
 func addCreateWaitError(diags *diag.Diagnostics, id string, err error) {
 	var opErr *client.OperationError
-	if errors.As(err, &opErr) && opErr.Operation.Failure != nil && opErr.Operation.Failure.Code == codeIPPoolExhausted {
-		diags.AddError("Error creating public IP", err.Error()+fmt.Sprintf("\n\nThe region has no free public addresses right now. Try again later. The failed address %s was saved to state, so the next apply replaces it.", id))
+	if errors.As(err, &opErr) && opErr.Operation.Failure != nil &&
+		(opErr.Operation.Failure.Code == codePublicIPUnavailable || opErr.Operation.Failure.Code == codeIPPoolExhausted) {
+		diags.AddError("Error creating public IP", err.Error()+fmt.Sprintf("\n\nThere was an error attaching a public IP address. Please try again later. The failed address %s was saved to state, so the next apply replaces it.", id))
 		return
 	}
 	resourcekit.AddWaitError(diags, "Error creating public IP", "public IP", id, err)
