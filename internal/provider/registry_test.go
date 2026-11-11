@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
@@ -72,7 +73,26 @@ func TestRegisteredSchemasAreValid(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"resource pantechdynamics_database", "resource pantechdynamics_database_snapshot", "data pantechdynamics_database_engines", "data pantechdynamics_security_group", "data pantechdynamics_ssh_key", "data pantechdynamics_instance", "data pantechdynamics_network", "resource pantechdynamics_load_balancer", "data pantechdynamics_load_balancer", "resource pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_versions", "resource pantechdynamics_webhook", "data pantechdynamics_webhook_event_types"} {
+	for _, newEphemeral := range p.EphemeralResources(ctx) {
+		e := newEphemeral()
+		var meta ephemeral.MetadataResponse
+		e.Metadata(ctx, ephemeral.MetadataRequest{ProviderTypeName: "pantechdynamics"}, &meta)
+		seen["ephemeral "+meta.TypeName] = true
+		var sresp ephemeral.SchemaResponse
+		e.Schema(ctx, ephemeral.SchemaRequest{}, &sresp)
+		if d := sresp.Schema.ValidateImplementation(ctx); d.HasError() {
+			t.Errorf("%s: %v", meta.TypeName, d)
+		}
+		if ec, ok := e.(ephemeral.EphemeralResourceWithConfigure); ok {
+			var cresp ephemeral.ConfigureResponse
+			ec.Configure(ctx, ephemeral.ConfigureRequest{ProviderData: c}, &cresp)
+			if cresp.Diagnostics.HasError() {
+				t.Errorf("%s: %v", meta.TypeName, cresp.Diagnostics)
+			}
+		}
+	}
+
+	for _, want := range []string{"resource pantechdynamics_database", "resource pantechdynamics_database_snapshot", "data pantechdynamics_database_engines", "data pantechdynamics_security_group", "data pantechdynamics_ssh_key", "data pantechdynamics_instance", "data pantechdynamics_network", "resource pantechdynamics_load_balancer", "data pantechdynamics_load_balancer", "resource pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_cluster", "data pantechdynamics_kubernetes_versions", "resource pantechdynamics_webhook", "data pantechdynamics_webhook_event_types", "resource pantechdynamics_dns_zone", "resource pantechdynamics_dns_record", "resource pantechdynamics_domain", "data pantechdynamics_dns_zone", "data pantechdynamics_dns_records", "data pantechdynamics_domain", "data pantechdynamics_domain_tlds", "resource pantechdynamics_container_registry_namespace", "resource pantechdynamics_container_repository", "resource pantechdynamics_container_registry_token", "data pantechdynamics_container_repository", "data pantechdynamics_container_repositories", "resource pantechdynamics_team", "resource pantechdynamics_team_membership", "resource pantechdynamics_access_policy", "resource pantechdynamics_access_policy_attachment", "resource pantechdynamics_access_settings", "data pantechdynamics_access_policy", "data pantechdynamics_iam_actions", "data pantechdynamics_access_policy_document", "resource pantechdynamics_certificate", "resource pantechdynamics_certificate_import", "data pantechdynamics_certificate", "data pantechdynamics_certificate_export", "ephemeral pantechdynamics_certificate_export"} {
 		if !seen[want] {
 			t.Errorf("%s is not registered", want)
 		}

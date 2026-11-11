@@ -31,6 +31,10 @@ type model struct {
 	PublicIPAddress types.String   `tfsdk:"public_ip_address"`
 	NetworkID       types.String   `tfsdk:"network_id"`
 	Protocol        types.String   `tfsdk:"protocol"`
+	CertificateID   types.String   `tfsdk:"certificate_id"`
+	TLSPolicy       types.String   `tfsdk:"tls_policy"`
+	RedirectHTTP    types.Bool     `tfsdk:"redirect_http"`
+	ServedCertFP    types.String   `tfsdk:"certificate_fingerprint_sha256"`
 	ObservedState   types.String   `tfsdk:"observed_state"`
 	CreatedAt       types.String   `tfsdk:"created_at"`
 	UpdatedAt       types.String   `tfsdk:"updated_at"`
@@ -46,17 +50,41 @@ func toCreateRequest(ctx context.Context, plan model) (client.CreateLoadBalancer
 	ids, d := stringsOf(ctx, plan.InstanceIDs)
 	diags.Append(d...)
 	return client.CreateLoadBalancerRequest{
-		Name:        plan.Name.ValueString(),
-		Kind:        knownString(plan.Kind),
-		ZoneID:      knownString(plan.ZoneID),
-		PublicIPID:  knownString(plan.PublicIPID),
-		SubnetID:    knownString(plan.SubnetID),
-		Algorithm:   plan.Algorithm.ValueString(),
-		PublicPort:  plan.PublicPort.ValueInt64(),
-		PrivatePort: resourcekit.IntPtr(plan.PrivatePort),
-		CIDRList:    cidrs,
-		InstanceIDs: ids,
+		Name:          plan.Name.ValueString(),
+		Kind:          knownString(plan.Kind),
+		ZoneID:        knownString(plan.ZoneID),
+		PublicIPID:    knownString(plan.PublicIPID),
+		SubnetID:      knownString(plan.SubnetID),
+		Algorithm:     plan.Algorithm.ValueString(),
+		PublicPort:    plan.PublicPort.ValueInt64(),
+		PrivatePort:   resourcekit.IntPtr(plan.PrivatePort),
+		CIDRList:      cidrs,
+		InstanceIDs:   ids,
+		Protocol:      httpsOnly(plan, plan.Protocol.ValueString()),
+		CertificateID: httpsOnly(plan, plan.CertificateID.ValueString()),
+		TLSPolicy:     httpsOnly(plan, plan.TLSPolicy.ValueString()),
+		RedirectHTTP:  redirectFor(plan),
 	}, diags
+}
+
+// isHTTPS reports whether the planned listener is https.
+func isHTTPS(m model) bool { return m.Protocol.ValueString() == client.LoadBalancerHTTPS }
+
+// httpsOnly sends an https listener's setting, and nothing for tcp, where
+// the backend refuses them (LOAD_BALANCER_TLS_FIELDS_NOT_ALLOWED).
+func httpsOnly(m model, v string) string {
+	if !isHTTPS(m) {
+		return ""
+	}
+	return v
+}
+
+func redirectFor(m model) *bool {
+	if !isHTTPS(m) || m.RedirectHTTP.IsNull() || m.RedirectHTTP.IsUnknown() {
+		return nil
+	}
+	v := m.RedirectHTTP.ValueBool()
+	return &v
 }
 
 // toUpdateRequest sends only what changed between state and plan. changed is
@@ -78,6 +106,17 @@ func toUpdateRequest(ctx context.Context, state, plan model) (req client.UpdateL
 			ids = []string{} // the whole new set is empty: remove every target
 		}
 		req.InstanceIDs, changed = &ids, true
+	}
+	if isHTTPS(plan) {
+		if !plan.CertificateID.Equal(state.CertificateID) {
+			req.CertificateID, changed = plan.CertificateID.ValueStringPointer(), true
+		}
+		if !plan.TLSPolicy.Equal(state.TLSPolicy) && !plan.TLSPolicy.IsUnknown() {
+			req.TLSPolicy, changed = plan.TLSPolicy.ValueStringPointer(), true
+		}
+		if !plan.RedirectHTTP.Equal(state.RedirectHTTP) {
+			req.RedirectHTTP, changed = redirectFor(plan), true
+		}
 	}
 	return req, changed, diags
 }
@@ -103,7 +142,11 @@ func fromAPIResponse(ctx context.Context, prev model, lb *client.LoadBalancer) (
 		InstanceIDs:     ids,
 		PublicIPAddress: resourcekit.OptionalString(lb.PublicIPAddress),
 		NetworkID:       resourcekit.OptionalString(lb.NetworkID),
-		Protocol:        types.StringValue(lb.Protocol),
+		Protocol:        types.StringValue(protocolOf(lb)),
+		CertificateID:   types.StringPointerValue(lb.CertificateID),
+		TLSPolicy:       types.StringPointerValue(lb.TLSPolicy),
+		RedirectHTTP:    types.BoolValue(lb.RedirectHTTP),
+		ServedCertFP:    types.StringPointerValue(lb.CertificateFingerprintSHA256),
 		ObservedState:   types.StringValue(lb.ObservedState),
 		CreatedAt:       resourcekit.Timestamp(lb.CreatedAt),
 		UpdatedAt:       resourcekit.Timestamp(lb.UpdatedAt),
@@ -118,7 +161,10 @@ func pendingModel(plan model, id string) model {
 	m.ID = types.StringValue(id)
 	m.PublicIPAddress = types.StringNull()
 	m.NetworkID = types.StringNull()
-	m.Protocol = types.StringNull()
+	m.ServedCertFP = types.StringNull()
+	if m.TLSPolicy.IsUnknown() {
+		m.TLSPolicy = types.StringNull()
+	}
 	m.ObservedState = types.StringNull()
 	m.CreatedAt = types.StringNull()
 	m.UpdatedAt = types.StringNull()
@@ -131,6 +177,15 @@ func pendingModel(plan model, id string) model {
 		}
 	}
 	return m
+}
+
+// protocolOf is the listener protocol; a load balancer made before https
+// existed may report none, and is tcp.
+func protocolOf(lb *client.LoadBalancer) string {
+	if lb.Protocol == "" {
+		return client.LoadBalancerTCP
+	}
+	return lb.Protocol
 }
 
 // kindOf is the load balancer's kind. One made before kinds existed reports

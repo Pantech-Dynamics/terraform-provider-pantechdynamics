@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -103,11 +104,89 @@ func (privatePortDefault) PlanModifyInt64(ctx context.Context, req planmodifier.
 		return
 	}
 	var public types.Int64
+	var protocol types.String
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("public_port"), &public)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("protocol"), &protocol)...)
+	if protocol.ValueString() == client.LoadBalancerHTTPS {
+		resp.PlanValue = types.Int64Value(httpsPrivatePort) // the backend's default for https
+		return
+	}
 	if public.IsNull() {
 		return
 	}
 	resp.PlanValue = public // unknown stays unknown until public_port is known
+}
+
+// httpsPrivatePort is the target port an https listener defaults to: it
+// speaks plain HTTP to the targets.
+const httpsPrivatePort = 80
+
+// tlsPolicyDefault plans an unset tls_policy as the backend does: "modern"
+// for an https listener, null for tcp.
+type tlsPolicyDefault struct{}
+
+func (tlsPolicyDefault) Description(context.Context) string {
+	return "modern for https, null for tcp"
+}
+
+func (v tlsPolicyDefault) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (tlsPolicyDefault) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var protocol types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("protocol"), &protocol)...)
+	switch {
+	case protocol.IsUnknown():
+	case protocol.ValueString() == client.LoadBalancerHTTPS:
+		resp.PlanValue = types.StringValue("modern")
+	default:
+		resp.PlanValue = types.StringNull()
+	}
+}
+
+// Ports an appliance keeps for itself.
+var reservedAppliancePorts = []int64{8404, 8405}
+
+// checkListener reports, at plan time, what the backend would refuse about
+// the listener: https on a vpc_native load balancer, https without a
+// certificate, TLS settings on tcp, redirect_http with port 80, and the
+// appliance's reserved ports.
+func checkListener(m model, diags *diag.Diagnostics) {
+	if m.Protocol.IsUnknown() || m.Kind.IsUnknown() || m.SubnetID.IsUnknown() || m.ZoneID.IsUnknown() || m.PublicIPID.IsUnknown() {
+		return
+	}
+	https := m.Protocol.ValueString() == client.LoadBalancerHTTPS
+	kind := m.Kind.ValueString()
+	if m.Kind.IsNull() {
+		kind = client.LoadBalancerVPCNative
+		if m.SubnetID.IsNull() && m.PublicIPID.IsNull() && !m.ZoneID.IsNull() {
+			kind = client.LoadBalancerAppliance
+		}
+	}
+	port := m.PublicPort.ValueInt64()
+	if kind == client.LoadBalancerAppliance && !m.PublicPort.IsUnknown() && slices.Contains(reservedAppliancePorts, port) {
+		diags.AddAttributeError(path.Root("public_port"), "Reserved port", fmt.Sprintf("An appliance load balancer keeps port %d for itself. Choose another public_port.", port))
+	}
+	if !https {
+		for name, set := range map[string]bool{"certificate_id": !m.CertificateID.IsNull(), "tls_policy": !m.TLSPolicy.IsNull(), "redirect_http": !m.RedirectHTTP.IsNull() && m.RedirectHTTP.ValueBool()} {
+			if set {
+				diags.AddAttributeError(path.Root(name), "HTTPS setting on a tcp listener", name+" applies to an https listener only: set protocol = \"https\", or remove "+name+".")
+			}
+		}
+		return
+	}
+	if kind == client.LoadBalancerVPCNative {
+		diags.AddAttributeError(path.Root("protocol"), "HTTPS not supported here",
+			"A vpc_native load balancer passes TCP through and cannot end TLS (LOAD_BALANCER_TLS_NOT_SUPPORTED). Use an appliance load balancer (kind = \"appliance\" with zone_id) for https.")
+	}
+	if m.CertificateID.IsNull() {
+		diags.AddAttributeError(path.Root("certificate_id"), "Missing certificate_id", "An https listener needs certificate_id, an issued Certificate Manager certificate.")
+	}
+	if !m.RedirectHTTP.IsNull() && !m.RedirectHTTP.IsUnknown() && m.RedirectHTTP.ValueBool() && !m.PublicPort.IsUnknown() && port == 80 {
+		diags.AddAttributeError(path.Root("public_port"), "Port 80 is the redirect", "With redirect_http = true, port 80 answers the redirect, so public_port cannot be 80. Use 443.")
+	}
 }
 
 // kindDefault plans an unset kind the way the backend infers it at create: a

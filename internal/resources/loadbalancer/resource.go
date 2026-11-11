@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
@@ -73,7 +74,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	emptySet := types.SetValueMust(types.StringType, nil)
 	resp.Schema = schema.Schema{
-		Description: "Spreads one TCP port across instances. There are two kinds. A vpc_native load balancer (VPC zone, no extra fee) uses one port of a load_balancer public IP and targets instances in one subnet of its network; one public IP can carry several, one per public port, and the subnet's firewall must also allow private_port, with a pantechdynamics_firewall_rule. An appliance load balancer (standard zone) is a managed load balancer VM with its own public address, billed as that VM; it targets instances in its zone, whose security groups must allow private_port. The name, algorithm and targets change in place; changing the kind, zone, public IP, subnet, ports or cidr_list replaces the load balancer.",
+		Description: "Spreads one port across instances, as plain TCP or, on an appliance, as HTTPS with a Certificate Manager certificate. There are two kinds. A vpc_native load balancer (VPC zone, no extra fee) uses one port of a load_balancer public IP and targets instances in one subnet of its network; one public IP can carry several, one per public port, and the subnet's firewall must also allow private_port, with a pantechdynamics_firewall_rule. An appliance load balancer (standard zone) is a managed load balancer VM with its own public address, billed as that VM; it targets instances in its zone, whose security groups must allow private_port. The name, algorithm, targets and the https settings (certificate_id, tls_policy, redirect_http) change in place; changing the kind, zone, public IP, subnet, protocol, ports or cidr_list replaces the load balancer.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description:   "Identifier of the load balancer, starting with lb_.",
@@ -126,7 +127,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.Int64{resourcekit.IntBetween(1, 65535)},
 			},
 			"private_port": schema.Int64Attribute{
-				Description:   "Port on each target, 1 to 65535. Defaults to public_port. Changing it replaces the load balancer.",
+				Description:   "Port on each target, 1 to 65535. Defaults to public_port, or to 80 for https. Changing it replaces the load balancer.",
 				Optional:      true,
 				Computed:      true,
 				PlanModifiers: []planmodifier.Int64{privatePortDefault{}, int64planmodifier.RequiresReplace()},
@@ -160,9 +161,34 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				PlanModifiers: keep,
 			},
 			"protocol": schema.StringAttribute{
-				Description:   "Protocol balanced. Always \"tcp\".",
+				Description:   "The listener protocol: \"tcp\" (the default) passes traffic through unchanged; \"https\" (appliance only) ends TLS on the load balancer with certificate_id and speaks plain HTTP to the targets, adding X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Port. Changing it replaces the load balancer.",
+				Optional:      true,
 				Computed:      true,
-				PlanModifiers: keep,
+				Default:       stringdefault.StaticString(client.LoadBalancerTCP),
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{resourcekit.OneOf(client.LoadBalancerTCP, client.LoadBalancerHTTPS)},
+			},
+			"certificate_id": schema.StringAttribute{
+				Description: "https only, and required there: the pantechdynamics_certificate (or pantechdynamics_certificate_import) the listener serves; it must be issued. Renewals reach the load balancer by themselves. While it is used, the certificate cannot be deleted. Changes in place.",
+				Optional:    true,
+				Validators:  []validator.String{resourcekit.IDPrefix("certificate", "cert_")},
+			},
+			"tls_policy": schema.StringAttribute{
+				Description:   "https only: \"modern\" (the default: TLS 1.2 and 1.3 with forward-secret AEAD ciphers only) or \"tls13\" (TLS 1.3 only). Null for tcp. Changes in place.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{tlsPolicyDefault{}},
+				Validators:    []validator.String{resourcekit.OneOf("modern", "tls13")},
+			},
+			"redirect_http": schema.BoolAttribute{
+				Description: "https only: also answer port 80 on the same address, redirecting every request to HTTPS with a 301 (cidr_list applies to it too). Defaults to false; public_port cannot then be 80. Changes in place.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"certificate_fingerprint_sha256": schema.StringAttribute{
+				Description: "SHA-256 of the certificate the load balancer serves now (lower-case hex), null until it serves one. It equals the certificate's fingerprint_sha256 once a renewal has reached the load balancer.",
+				Computed:    true,
 			},
 			"observed_state": schema.StringAttribute{
 				Description: "State of the load balancer as the platform sees it, for example \"active\".",
@@ -193,6 +219,11 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 		return
 	}
 	checkPlacement(kind, zone, publicIP, subnet, &resp.Diagnostics)
+	var m model
+	resp.Diagnostics.Append(req.Config.Get(ctx, &m)...)
+	if !resp.Diagnostics.HasError() {
+		checkListener(m, &resp.Diagnostics)
+	}
 }
 
 // Configure receives the API client built by the provider.
@@ -429,17 +460,20 @@ var createHints = map[string]string{
 	client.CodePublicIPNotForLoadBalancer: "Use an active pantechdynamics_public_ip with purpose = \"load_balancer\" in the subnet's network.",
 	client.CodePortInUse:                  "Another load balancer on this public IP already uses public_port. Choose another port, or delete that load balancer first.",
 	client.CodeInsufficientCredit:         "An appliance load balancer runs on a VM billed to your account. Add credit or a card, then apply again.",
+	client.CodeCertificatesUnavailable:    "HTTPS listeners need certificates, which are not available on this platform yet.",
 }
 
 // updateHints explain the update refusals a user can act on.
 var updateHints = map[string]string{
 	client.CodeLoadBalancerNotChangeable: "The load balancer is being deleted or has failed, so it cannot be changed. Replace it with `terraform apply -replace`.",
+	client.CodeCertificatesUnavailable:   "HTTPS listeners need certificates, which are not available on this platform yet.",
 }
 
 // attributeFor maps a 422 field to a schema attribute.
 func attributeFor(field string) (path.Path, bool) {
 	switch field {
-	case "name", "kind", "zone_id", "public_ip_id", "subnet_id", "algorithm", "public_port", "private_port", "cidr_list", "instance_ids":
+	case "name", "kind", "zone_id", "public_ip_id", "subnet_id", "algorithm", "public_port", "private_port", "cidr_list", "instance_ids",
+		"protocol", "certificate_id", "tls_policy", "redirect_http":
 		return path.Root(field), true
 	}
 	return path.Path{}, false
