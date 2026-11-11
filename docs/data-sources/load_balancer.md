@@ -35,6 +35,8 @@ output "web_address" {
 ### Read-Only
 
 - `algorithm` (String) How connections are spread: "roundrobin", "leastconn" or "source".
+- `certificate_fingerprint_sha256` (String) SHA-256 of the certificate the load balancer serves now, or null.
+- `certificate_id` (String) The certificate an https listener serves; null for tcp.
 - `cidr_list` (Set of String) Source CIDRs allowed to connect. Empty allows any source.
 - `created_at` (String) When the load balancer was created, in RFC 3339 UTC, to the second.
 - `instance_ids` (Set of String) Ids of the target instances, leaving out any being removed.
@@ -42,9 +44,11 @@ output "web_address" {
 - `network_id` (String) Id of the VPC network the load balancer is in. Null for an appliance.
 - `observed_state` (String) State of the load balancer as the platform sees it, for example "active".
 - `private_port` (Number) Port on each target.
-- `protocol` (String) Protocol balanced. Always "tcp".
+- `protocol` (String) The listener protocol: "tcp" or "https".
 - `public_ip_address` (String) The public IPv4 address clients connect to.
 - `public_ip_id` (String) Id of the public IP clients connect to (vpc_native).
 - `public_port` (Number) TCP port clients connect to.
+- `redirect_http` (Boolean) Whether port 80 redirects to HTTPS.
 - `subnet_id` (String) Id of the subnet the targets are in.
+- `tls_policy` (String) "modern" or "tls13" for https; null for tcp.
 - `zone_id` (String) Zone the load balancer is in.

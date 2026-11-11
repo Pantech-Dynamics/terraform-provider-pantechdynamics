@@ -24,7 +24,20 @@ type fakeAPI struct {
 	instances []client.Instance
 	lbs       []client.LoadBalancer
 	clusters  []client.KubernetesCluster
+	zones     []client.DNSZone
+	domains   []client.Domain
+	lastQ     string
 	err       error
+}
+
+func (f *fakeAPI) ListDNSZones(_ context.Context, q string) ([]client.DNSZone, error) {
+	f.lastQ = q
+	return f.zones, f.err
+}
+
+func (f *fakeAPI) ListDomains(_ context.Context, q string) ([]client.Domain, error) {
+	f.lastQ = q
+	return f.domains, f.err
 }
 
 func (f *fakeAPI) ListKubernetesClusters(context.Context) ([]client.KubernetesCluster, error) {
@@ -64,6 +77,11 @@ func fixture() *fakeAPI {
 					{InstanceID: "vm_2", DesiredState: "present"}, {InstanceID: "vm_1", DesiredState: "present"}, {InstanceID: "vm_3", DesiredState: "deleted"},
 				}},
 		},
+		zones: []client.DNSZone{
+			{ID: "dnsz_1", Name: "example.com", Status: "active", NameServers: []string{"ns-1.example-dns.org"}, RecordCount: 4},
+			{ID: "dnsz_2", Name: "example.org", Status: "awaiting_delegation"},
+		},
+		domains: []client.Domain{{ID: "dom_1", Name: "example.com", TLD: "com", Status: "active", NameServerMode: "pantech", ZoneID: ptr("dnsz_1")}},
 		clusters: []client.KubernetesCluster{
 			{ID: "k8s_1", Name: "prod", ZoneID: "af-abj-2", KubernetesVersionID: "k8sv_1", KubernetesVersion: "1.31.2", NetworkID: ptr("net_1"), SubnetID: ptr("snet_1"),
 				NodePlanID: "plan_1", Node: client.KubernetesNode{VCPU: 2, MemoryMB: 4096, DiskGB: 40}, ControlNodes: 1, Workers: 2, Nodes: 3,
@@ -134,6 +152,11 @@ func TestLookups(t *testing.T) {
 		{"load balancer unknown id", &LoadBalancerDataSource{api: api}, map[string]string{"id": "lb_9"}, "", "Available ids: lb_1."},
 		{"kubernetes cluster by name", &KubernetesClusterDataSource{api: api}, map[string]string{"name": "prod"}, "k8s_1", ""},
 		{"kubernetes cluster unknown id", &KubernetesClusterDataSource{api: api}, map[string]string{"id": "k8s_9"}, "", "Available ids: k8s_1."},
+		{"dns zone by name", &DNSZoneDataSource{api: api}, map[string]string{"name": "example.org"}, "dnsz_2", ""},
+		{"dns zone by id", &DNSZoneDataSource{api: api}, map[string]string{"id": "dnsz_1"}, "dnsz_1", ""},
+		{"dns zone unknown", &DNSZoneDataSource{api: api}, map[string]string{"name": "example.net"}, "", "Available names: example.com, example.org."},
+		{"domain by name", &DomainDataSource{api: api}, map[string]string{"name": "example.com"}, "dom_1", ""},
+		{"domain unknown id", &DomainDataSource{api: api}, map[string]string{"id": "dom_9"}, "", "Domain not found"},
 		{"both selectors", &NetworkDataSource{api: api}, map[string]string{"id": "net_1", "name": "main"}, "", "exactly one"},
 		{"no selector", &SSHKeyDataSource{api: api}, map[string]string{}, "", "exactly one"},
 		{"api error", &SSHKeyDataSource{api: &fakeAPI{err: errors.New("boom")}}, map[string]string{"name": "x"}, "", "boom"},
@@ -212,5 +235,30 @@ func TestKubernetesClusterLookupMapsTheDetails(t *testing.T) {
 	if !auto["enabled"].Equal(types.BoolValue(true)) || !auto["min_workers"].Equal(types.Int64Value(2)) || !auto["max_workers"].Equal(types.Int64Value(5)) ||
 		len(m.APIAllowedCIDRs.Elements()) != 1 || m.Endpoint.ValueString() != "https://k8s-1.example.test:6443" || m.VolumeStorageGB.ValueInt64() != 30 {
 		t.Errorf("new fields: autoscaling %v, cidrs %v, endpoint %v, volume %v", auto, m.APIAllowedCIDRs, m.Endpoint, m.VolumeStorageGB)
+	}
+}
+
+func TestDNSZoneLookupNarrowsByNameAndMapsTheDetails(t *testing.T) {
+	api := fixture()
+	resp := read(t, &DNSZoneDataSource{api: api}, map[string]string{"name": "example.com"})
+	var m dnsZoneModel
+	resp.Diagnostics.Append(resp.State.Get(ctx, &m)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if api.lastQ != "example.com" || m.RecordCount.ValueInt64() != 4 || len(m.NameServers.Elements()) != 1 || !m.DomainID.IsNull() {
+		t.Errorf("q = %q, model = %+v", api.lastQ, m)
+	}
+}
+
+func TestDomainLookupMapsTheDetails(t *testing.T) {
+	resp := read(t, &DomainDataSource{api: fixture()}, map[string]string{"id": "dom_1"})
+	var m domainModel
+	resp.Diagnostics.Append(resp.State.Get(ctx, &m)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if m.ZoneID.ValueString() != "dnsz_1" || m.NameServerMode.ValueString() != "pantech" || len(m.NameServers.Elements()) != 0 {
+		t.Errorf("model = %+v", m)
 	}
 }

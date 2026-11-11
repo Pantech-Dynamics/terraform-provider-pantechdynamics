@@ -44,6 +44,11 @@ const (
 	// LoadBalancerAppliance is a platform-managed load balancer VM with its own
 	// public address, in a standard zone, billed as that VM.
 	LoadBalancerAppliance = "appliance"
+
+	// LoadBalancerTCP passes traffic through; LoadBalancerHTTPS ends TLS on
+	// an appliance load balancer with a Certificate Manager certificate.
+	LoadBalancerTCP   = "tcp"
+	LoadBalancerHTTPS = "https"
 )
 
 // LoadBalancer spreads one TCP port across instances: either a load_balancer
@@ -68,8 +73,17 @@ type LoadBalancer struct {
 	DesiredState    string               `json:"desired_state"`
 	ObservedState   string               `json:"observed_state"`
 	InSync          bool                 `json:"in_sync"`
-	CreatedAt       *time.Time           `json:"created_at"`
-	UpdatedAt       *time.Time           `json:"updated_at"`
+
+	// CertificateID, TLSPolicy and RedirectHTTP are the https listener's
+	// settings; null (and false) for tcp. CertificateFingerprintSHA256 is the
+	// certificate the load balancer serves now, null until it serves one; it
+	// changes by itself when the certificate renews.
+	CertificateID                *string    `json:"certificate_id"`
+	TLSPolicy                    *string    `json:"tls_policy"`
+	RedirectHTTP                 bool       `json:"redirect_http"`
+	CertificateFingerprintSHA256 *string    `json:"certificate_fingerprint_sha256"`
+	CreatedAt                    *time.Time `json:"created_at"`
+	UpdatedAt                    *time.Time `json:"updated_at"`
 }
 
 // CreateLoadBalancerRequest creates a load balancer. Unset optional fields are
@@ -88,6 +102,13 @@ type CreateLoadBalancerRequest struct {
 	PrivatePort *int64   `json:"private_port,omitempty"`
 	CIDRList    []string `json:"cidr_list,omitempty"`
 	InstanceIDs []string `json:"instance_ids,omitempty"`
+
+	// Protocol is "tcp" (the default, left out) or "https" (appliance only),
+	// which needs CertificateID. TLSPolicy and RedirectHTTP are https only.
+	Protocol      string `json:"protocol,omitempty"`
+	CertificateID string `json:"certificate_id,omitempty"`
+	TLSPolicy     string `json:"tls_policy,omitempty"`
+	RedirectHTTP  *bool  `json:"redirect_http,omitempty"`
 }
 
 // UpdateLoadBalancerRequest changes a load balancer. A nil field is left as it
@@ -97,6 +118,12 @@ type UpdateLoadBalancerRequest struct {
 	Name        *string   `json:"name,omitempty"`
 	Algorithm   *string   `json:"algorithm,omitempty"`
 	InstanceIDs *[]string `json:"instance_ids,omitempty"`
+
+	// https listeners only: serve another certificate, change the TLS
+	// policy, or turn the port 80 redirect on or off.
+	CertificateID *string `json:"certificate_id,omitempty"`
+	TLSPolicy     *string `json:"tls_policy,omitempty"`
+	RedirectHTTP  *bool   `json:"redirect_http,omitempty"`
 }
 
 // CreateLoadBalancer starts creating a load balancer. Its id is the returned

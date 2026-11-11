@@ -50,6 +50,17 @@ var notFoundCodes = map[string]bool{
 	"DATABASE_ORDER_NOT_FOUND":    true,
 	"RECEIPT_NOT_FOUND":           true,
 	CodeWebhookNotFound:           true,
+	CodeDNSZoneNotFound:           true,
+	CodeDNSRecordNotFound:         true,
+	CodeDomainNotFound:            true,
+	CodeDomainOrderNotFound:       true,
+	CodeRepositoryNotFound:        true,
+	CodeRegistryTokenNotFound:     true,
+	codeTagNotFound:               true,
+	CodeIAMTeamNotFound:           true,
+	CodeIAMPolicyNotFound:         true,
+	CodeIAMAttachmentNotFound:     true,
+	CodeCertificateNotFound:       true,
 }
 
 // FieldError is one entry of a 422 validation failure.

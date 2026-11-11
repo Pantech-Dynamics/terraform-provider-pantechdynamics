@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/dnsname"
 )
 
 // NameLength returns a validator for a name of 1 to maxLen characters. kind names
@@ -124,4 +127,107 @@ func (v intBetween) ValidateInt64(_ context.Context, req validator.Int64Request,
 		resp.Diagnostics.AddAttributeError(req.Path, "Value out of range",
 			fmt.Sprintf("The value must be between %d and %d, got %d.", v.min, v.max, got))
 	}
+}
+
+// DomainName returns a validator for a zone or domain name in the form the
+// backend stores it: lower case, no trailing dot, such as "example.com".
+// kind names the resource in the error, for example "dns zone".
+func DomainName(kind string) validator.String { return domainName{kind: kind} }
+
+type domainName struct{ kind string }
+
+func (v domainName) Description(context.Context) string {
+	return "must be a lower-case domain name without a trailing dot, such as example.com"
+}
+
+func (v domainName) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (v domainName) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if problem := dnsname.ZoneNameProblem(req.ConfigValue.ValueString()); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+v.kind+" name",
+			fmt.Sprintf("The name %s, got %q.", problem, req.ConfigValue.ValueString()))
+	}
+}
+
+// MaxLength returns a validator for a string of at most maxLen characters; an
+// empty string is fine.
+func MaxLength(maxLen int) validator.String { return maxLength{max: maxLen} }
+
+type maxLength struct{ max int }
+
+func (v maxLength) Description(context.Context) string {
+	return fmt.Sprintf("must be at most %d characters", v.max)
+}
+
+func (v maxLength) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (v maxLength) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if n := utf8.RuneCountInString(req.ConfigValue.ValueString()); n > v.max {
+		resp.Diagnostics.AddAttributeError(req.Path, "Value too long", fmt.Sprintf("Got %d characters; at most %d are allowed.", n, v.max))
+	}
+}
+
+// maxRepositoryNameLength is the registry's limit on a repository name.
+const maxRepositoryNameLength = 255
+
+// RepositoryName returns a validator for a container repository name inside
+// the namespace, such as "api/server": path components of lower-case letters
+// and digits, separated within a component by single ".", "_" or "-".
+func RepositoryName() validator.String { return repositoryName{} }
+
+type repositoryName struct{}
+
+func (repositoryName) Description(context.Context) string {
+	return "must be lower-case path components such as api/server, at most 255 characters"
+}
+
+func (v repositoryName) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (repositoryName) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if name := req.ConfigValue.ValueString(); !ValidRepositoryName(name) {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid repository name",
+			fmt.Sprintf("A repository name is lower-case letters and digits, with single \".\", \"_\" or \"-\" between them, in path components separated by \"/\" (such as \"api/server\"), at most %d characters; got %q.", maxRepositoryNameLength, name))
+	}
+}
+
+// ValidRepositoryName reports whether name follows the repository grammar
+// [a-z0-9]+([._-][a-z0-9]+)* for each "/"-separated component.
+func ValidRepositoryName(name string) bool {
+	if name == "" || len(name) > maxRepositoryNameLength {
+		return false
+	}
+	for _, component := range strings.Split(name, "/") {
+		if !validRepositoryComponent(component) {
+			return false
+		}
+	}
+	return true
+}
+
+func validRepositoryComponent(c string) bool {
+	if c == "" {
+		return false
+	}
+	alnum := func(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') }
+	if !alnum(c[0]) || !alnum(c[len(c)-1]) {
+		return false
+	}
+	for i := 1; i < len(c); i++ {
+		if !alnum(c[i]) && !alnum(c[i-1]) {
+			return false // two separators in a row
+		}
+		if !alnum(c[i]) && c[i] != '.' && c[i] != '_' && c[i] != '-' {
+			return false
+		}
+	}
+	return true
 }

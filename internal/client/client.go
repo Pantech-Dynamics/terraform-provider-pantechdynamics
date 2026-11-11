@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,6 +92,10 @@ type requestSpec struct {
 	// result when re-sent with the same Idempotency-Key, which makes retrying
 	// it on a 5xx or transport error safe. It defaults to false.
 	replaySafe bool
+
+	// ifMatch is sent as the If-Match header when set, so the backend refuses
+	// the change (412 VERSION_CONFLICT) if the object moved on since it was read.
+	ifMatch string
 }
 
 // callOption customises a single API call.
@@ -100,6 +105,11 @@ type callOption func(*requestSpec)
 // Use it only for endpoints verified to replay on the same Idempotency-Key.
 func replaySafe() callOption {
 	return func(s *requestSpec) { s.replaySafe = true }
+}
+
+// ifMatch sends If-Match with the object's version, for optimistic locking.
+func ifMatch(version int64) callOption {
+	return func(s *requestSpec) { s.ifMatch = strconv.FormatInt(version, 10) }
 }
 
 // response is a fully read HTTP response. Reading it eagerly means the body is
@@ -202,6 +212,9 @@ func (c *Client) buildRequest(ctx context.Context, spec requestSpec) (*http.Requ
 	}
 	if spec.idempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", spec.idempotencyKey)
+	}
+	if spec.ifMatch != "" {
+		req.Header.Set("If-Match", spec.ifMatch)
 	}
 	return req, nil
 }

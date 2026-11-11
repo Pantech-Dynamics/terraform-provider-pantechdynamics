@@ -128,3 +128,33 @@ func TestLoadBalancerRefusalsKeepTheirCode(t *testing.T) {
 		})
 	}
 }
+
+// An https listener sends its TLS settings and reads back the certificate
+// it serves.
+func TestCreateHTTPSLoadBalancer(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		for _, want := range []string{`"protocol":"https"`, `"certificate_id":"cert_1"`, `"tls_policy":"tls13"`, `"redirect_http":true`} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("body = %s, want %s", body, want)
+			}
+		}
+		w.WriteHeader(202)
+		_, _ = w.Write([]byte(`{"operation_id":"op_1","resource_id":"lb_1","status":"submitted"}`))
+	})
+	on := true
+	if _, err := c.CreateLoadBalancer(context.Background(), CreateLoadBalancerRequest{Name: "web", Kind: LoadBalancerAppliance, ZoneID: "af-abj-1", PublicPort: 443,
+		Protocol: LoadBalancerHTTPS, CertificateID: "cert_1", TLSPolicy: "tls13", RedirectHTTP: &on}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadBalancerReadsTheServedCertificate(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"lb_1","protocol":"https","certificate_id":"cert_1","tls_policy":"modern","redirect_http":true,"certificate_fingerprint_sha256":"9f2c"}`))
+	})
+	lb, err := c.GetLoadBalancer(context.Background(), "lb_1")
+	if err != nil || *lb.CertificateID != "cert_1" || *lb.TLSPolicy != "modern" || !lb.RedirectHTTP || *lb.CertificateFingerprintSHA256 != "9f2c" {
+		t.Fatalf("lb = %+v, err = %v", lb, err)
+	}
+}

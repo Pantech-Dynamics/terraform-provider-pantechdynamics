@@ -8,16 +8,30 @@ import (
 	"time"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/certificates"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/containerrepositories"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/databaseengines"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/dnsrecords"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/domaintlds"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/iam"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/kubernetesversions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/lookups"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/plans"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/regions"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/webhookeventtypes"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesspolicy"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesspolicyattachment"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesssettings"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificate"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificateimport"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/containerrepository"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/database"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/dnsrecord"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/dnszone"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/domain"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetesaddon"
@@ -27,15 +41,19 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/network"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/portforward"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/publicip"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/registrynamespace"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/registrytoken"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/securitygroup"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/snapshot"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/snapshotschedule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/sshkey"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/subnet"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/team"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/volume"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/webhook"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -49,7 +67,10 @@ const (
 	envRequestTimeout = "PANTECHDYNAMICS_REQUEST_TIMEOUT"
 )
 
-var _ provider.Provider = &PantechDynamicsProvider{}
+var (
+	_ provider.Provider                       = &PantechDynamicsProvider{}
+	_ provider.ProviderWithEphemeralResources = &PantechDynamicsProvider{}
+)
 
 // PantechDynamicsProvider implements provider.Provider.
 type PantechDynamicsProvider struct {
@@ -117,6 +138,7 @@ func (p *PantechDynamicsProvider) Configure(ctx context.Context, req provider.Co
 
 	resp.ResourceData = c
 	resp.DataSourceData = c
+	resp.EphemeralResourceData = c
 }
 
 // newClient resolves the settings (HCL first, then environment) and builds the
@@ -187,9 +209,20 @@ func parseRequestTimeout(raw string) (time.Duration, error) {
 // Resources lists the resources this provider offers.
 func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		accesspolicy.New,
+		accesspolicyattachment.New,
+		accesssettings.New,
+		certificate.New,
+		certificateimport.New,
+		containerrepository.New,
 		database.New,
 		databasesnapshot.New,
+		dnsrecord.New,
+		dnszone.New,
+		domain.New,
 		firewallrule.New,
+		registrynamespace.New,
+		registrytoken.New,
 		instance.New,
 		kubernetescluster.New,
 		kubernetesnodepool.New,
@@ -203,19 +236,40 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		snapshotschedule.New,
 		sshkey.New,
 		subnet.New,
+		team.New,
+		team.NewMembership,
 		volume.New,
 		webhook.New,
+	}
+}
+
+// EphemeralResources lists the ephemeral resources this provider offers:
+// values Terraform keeps for one run only, never in the plan or state.
+func (p *PantechDynamicsProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		certificates.NewExportEphemeral,
 	}
 }
 
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		certificates.New,
+		certificates.NewExport,
+		containerrepositories.New,
+		containerrepositories.NewSingle,
 		databaseengines.New,
 		diskofferings.New,
+		iam.NewActions,
+		iam.NewDocument,
+		iam.NewPolicy,
+		dnsrecords.New,
+		domaintlds.New,
 		images.New,
 		images.NewSingle,
 		kubernetesversions.New,
+		lookups.NewDNSZone,
+		lookups.NewDomain,
 		lookups.NewInstance,
 		lookups.NewKubernetesCluster,
 		lookups.NewLoadBalancer,

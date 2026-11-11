@@ -106,3 +106,46 @@ func TestIDPrefix(t *testing.T) {
 		t.Error("unknown must be skipped (a reference is not resolved yet)")
 	}
 }
+
+func TestDomainName(t *testing.T) {
+	v := resourcekit.DomainName("dns zone")
+	for in, wantErr := range map[string]bool{"example.com": false, "shop.example.co.uk": false, "Example.com": true, "example.com.": true, "com": true, "": true} {
+		var resp validator.StringResponse
+		v.ValidateString(Ctx, validator.StringRequest{Path: path.Root("name"), ConfigValue: types.StringValue(in)}, &resp)
+		if resp.Diagnostics.HasError() != wantErr {
+			t.Errorf("%q: error = %v, want %v", in, resp.Diagnostics.HasError(), wantErr)
+		}
+	}
+	var resp validator.StringResponse
+	v.ValidateString(Ctx, validator.StringRequest{ConfigValue: types.StringUnknown()}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Error("unknown must be skipped")
+	}
+}
+
+func TestMaxLength(t *testing.T) {
+	v := resourcekit.MaxLength(3)
+	for in, wantErr := range map[string]bool{"": false, "abc": false, "äöü": false, "abcd": true} {
+		var resp validator.StringResponse
+		v.ValidateString(Ctx, validator.StringRequest{Path: path.Root("description"), ConfigValue: types.StringValue(in)}, &resp)
+		if resp.Diagnostics.HasError() != wantErr {
+			t.Errorf("%q: error = %v, want %v", in, resp.Diagnostics.HasError(), wantErr)
+		}
+	}
+}
+
+func TestRepositoryName(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"api": true, "api/server": true, "a.b_c-d/e1": true, "API": false, "api//server": false, "/api": false, "api/": false,
+		"api--server": false, "-api": false, "api.": false, "api server": false, "": false, strings.Repeat("a", 256): false,
+	} {
+		if resourcekit.ValidRepositoryName(name) != ok {
+			t.Errorf("%q: valid = %v, want %v", name, !ok, ok)
+		}
+	}
+	var resp validator.StringResponse
+	resourcekit.RepositoryName().ValidateString(Ctx, validator.StringRequest{Path: path.Root("name"), ConfigValue: types.StringValue("Bad")}, &resp)
+	if !resp.Diagnostics.HasError() {
+		t.Error("an invalid name must be refused")
+	}
+}

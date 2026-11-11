@@ -1,6 +1,7 @@
 // Package lookups holds the data sources that find one existing account
 // resource by id or by name: pantechdynamics_security_group, _ssh_key,
-// _instance, _network, _load_balancer and _kubernetes_cluster. They share the
+// _instance, _network, _load_balancer, _kubernetes_cluster, _dns_zone and
+// _domain. They share the
 // selector attributes and the matching rules in package lookup.
 package lookups
 

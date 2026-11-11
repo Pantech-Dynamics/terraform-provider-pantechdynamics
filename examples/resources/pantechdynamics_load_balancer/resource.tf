@@ -82,3 +82,31 @@ resource "pantechdynamics_load_balancer" "app" {
 output "app_url" {
   value = "http://${pantechdynamics_load_balancer.app.public_ip_address}"
 }
+
+# HTTPS on an appliance load balancer: TLS ends on the load balancer with a
+# Certificate Manager certificate, renewed by itself, and the targets get
+# plain HTTP on port 80 with X-Forwarded-* headers. Port 80 on the same
+# address redirects to HTTPS. While the load balancer uses it, the
+# certificate cannot be deleted.
+resource "pantechdynamics_certificate" "shop" {
+  names = ["shop.example.com"]
+}
+
+resource "pantechdynamics_load_balancer" "shop" {
+  name           = "shop"
+  zone_id        = "af-abj-1"
+  protocol       = "https"
+  public_port    = 443
+  certificate_id = pantechdynamics_certificate.shop.id
+  tls_policy     = "tls13" # "modern" (the default) also allows TLS 1.2
+  redirect_http  = true
+  instance_ids   = pantechdynamics_instance.app[*].id
+}
+
+output "shop_url" {
+  value = "https://shop.example.com" # point shop.example.com at the address below
+}
+
+output "shop_address" {
+  value = pantechdynamics_load_balancer.shop.public_ip_address
+}

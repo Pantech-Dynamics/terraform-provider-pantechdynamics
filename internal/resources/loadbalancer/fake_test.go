@@ -74,6 +74,19 @@ func (f *fakeAPI) CreateLoadBalancer(_ context.Context, req client.CreateLoadBal
 	if req.PrivatePort != nil {
 		lb.PrivatePort = *req.PrivatePort
 	}
+	if req.Protocol == client.LoadBalancerHTTPS {
+		// The backend defaults an https listener to modern TLS and port 80
+		// on the targets, and reports the certificate it serves.
+		lb.Protocol, lb.CertificateID, lb.TLSPolicy = req.Protocol, ptr(req.CertificateID), ptr("modern")
+		lb.CertificateFingerprintSHA256 = ptr("fp_" + req.CertificateID)
+		if req.TLSPolicy != "" {
+			lb.TLSPolicy = ptr(req.TLSPolicy)
+		}
+		if req.PrivatePort == nil {
+			lb.PrivatePort = 80
+		}
+		lb.RedirectHTTP = req.RedirectHTTP != nil && *req.RedirectHTTP
+	}
 	f.lbs = append(f.lbs, lb)
 	return &client.OperationReference{OperationID: "op_" + id, ResourceID: id}, nil
 }
@@ -113,6 +126,15 @@ func (f *fakeAPI) UpdateLoadBalancer(_ context.Context, id string, req client.Up
 		}
 		if req.InstanceIDs != nil {
 			lb.Members = members(*req.InstanceIDs)
+		}
+		if req.CertificateID != nil {
+			lb.CertificateID, lb.CertificateFingerprintSHA256 = req.CertificateID, ptr("fp_"+*req.CertificateID)
+		}
+		if req.TLSPolicy != nil {
+			lb.TLSPolicy = req.TLSPolicy
+		}
+		if req.RedirectHTTP != nil {
+			lb.RedirectHTTP = *req.RedirectHTTP
 		}
 		lb.InSync = !f.outOfSync
 	}

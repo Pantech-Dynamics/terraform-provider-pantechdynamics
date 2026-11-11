@@ -41,6 +41,10 @@ type loadBalancerModel struct {
 	NetworkID       types.String `tfsdk:"network_id"`
 	SubnetID        types.String `tfsdk:"subnet_id"`
 	Protocol        types.String `tfsdk:"protocol"`
+	CertificateID   types.String `tfsdk:"certificate_id"`
+	TLSPolicy       types.String `tfsdk:"tls_policy"`
+	RedirectHTTP    types.Bool   `tfsdk:"redirect_http"`
+	ServedCertFP    types.String `tfsdk:"certificate_fingerprint_sha256"`
 	Algorithm       types.String `tfsdk:"algorithm"`
 	PublicPort      types.Int64  `tfsdk:"public_port"`
 	PrivatePort     types.Int64  `tfsdk:"private_port"`
@@ -64,7 +68,11 @@ func (d *LoadBalancerDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 	attrs["public_ip_address"] = schema.StringAttribute{Computed: true, Description: "The public IPv4 address clients connect to."}
 	attrs["network_id"] = schema.StringAttribute{Computed: true, Description: "Id of the VPC network the load balancer is in. Null for an appliance."}
 	attrs["subnet_id"] = schema.StringAttribute{Computed: true, Description: "Id of the subnet the targets are in."}
-	attrs["protocol"] = schema.StringAttribute{Computed: true, Description: "Protocol balanced. Always \"tcp\"."}
+	attrs["protocol"] = schema.StringAttribute{Computed: true, Description: "The listener protocol: \"tcp\" or \"https\"."}
+	attrs["certificate_id"] = schema.StringAttribute{Computed: true, Description: "The certificate an https listener serves; null for tcp."}
+	attrs["tls_policy"] = schema.StringAttribute{Computed: true, Description: "\"modern\" or \"tls13\" for https; null for tcp."}
+	attrs["redirect_http"] = schema.BoolAttribute{Computed: true, Description: "Whether port 80 redirects to HTTPS."}
+	attrs["certificate_fingerprint_sha256"] = schema.StringAttribute{Computed: true, Description: "SHA-256 of the certificate the load balancer serves now, or null."}
 	attrs["algorithm"] = schema.StringAttribute{Computed: true, Description: "How connections are spread: \"roundrobin\", \"leastconn\" or \"source\"."}
 	attrs["public_port"] = schema.Int64Attribute{Computed: true, Description: "TCP port clients connect to."}
 	attrs["private_port"] = schema.Int64Attribute{Computed: true, Description: "Port on each target."}
@@ -119,6 +127,8 @@ func (d *LoadBalancerDataSource) Read(ctx context.Context, req datasource.ReadRe
 		PublicIPID: types.StringValue(lb.PublicIPID), PublicIPAddress: resourcekit.OptionalString(lb.PublicIPAddress),
 		NetworkID: resourcekit.OptionalString(lb.NetworkID), SubnetID: types.StringValue(lb.SubnetID),
 		Protocol: types.StringValue(lb.Protocol), Algorithm: types.StringValue(lb.Algorithm),
+		CertificateID: types.StringPointerValue(lb.CertificateID), TLSPolicy: types.StringPointerValue(lb.TLSPolicy),
+		RedirectHTTP: types.BoolValue(lb.RedirectHTTP), ServedCertFP: types.StringPointerValue(lb.CertificateFingerprintSHA256),
 		PublicPort: types.Int64Value(lb.PublicPort), PrivatePort: types.Int64Value(lb.PrivatePort),
 		CIDRList: cidrs, InstanceIDs: targets,
 		ObservedState: types.StringValue(lb.ObservedState), CreatedAt: resourcekit.Timestamp(lb.CreatedAt),
