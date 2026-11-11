@@ -43,7 +43,7 @@ output "name_servers" {
 - `domain_id` (String) Id of the Pantech domain (dom_...) that delegates to this zone, or null.
 - `failure_code` (String) Why the zone failed, for example "delegation_timeout". Null otherwise.
 - `id` (String) Identifier of the zone, starting with dnsz_.
-- `name_servers` (List of String) The two Pantech DNS name servers that serve the zone, such as ana.ns.pantechdynamics.com. Set exactly these at the domain's registrar.
+- `name_servers` (List of String) The two Pantech DNS name servers that serve the zone, such as ana-ns.pantechdynamics.com. Set exactly these at the domain's registrar.
 - `record_count` (Number) How many record sets the zone holds, including the managed apex SOA and NS.
 - `status` (String) State of the zone: "pending" (being created), "awaiting_delegation" (waiting for the registrar to point at name_servers), "active", "suspended", "deleting" or "failed".
 

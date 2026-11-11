@@ -99,7 +99,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Computed:    true,
 			},
 			"name_servers": schema.ListAttribute{
-				Description:   "The two Pantech DNS name servers that serve the zone, such as ana.ns.pantechdynamics.com. Set exactly these at the domain's registrar.",
+				Description:   "The two Pantech DNS name servers that serve the zone, such as ana-ns.pantechdynamics.com. Set exactly these at the domain's registrar.",
 				Computed:      true,
 				ElementType:   types.StringType,
 				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
