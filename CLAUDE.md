@@ -306,6 +306,12 @@ Paths above are relative to the base URL.
 - `validations[]` per name: `pantech_dns` (Pantech writes the challenge) or `cname` (`cname_name` → `cname_target`, shared by names with one challenge name). Delete and revoke are `409 CERTIFICATE_IN_USE` while `in_use_by` is not empty. The PEMs are never returned except by export; `fingerprint_sha256` (SHA-256 of the leaf DER) is how the import resource detects a re-import. `CERTIFICATE_NOT_FOUND` counts as `ErrNotFound`.
 - Cross-checked 2026-11-10 against the real DNS, domain, registry and IAM handlers: routes, request bodies (unknown fields refused), response shapes, status codes, integer `If-Match`, `managed=` filter and the 200-for-existing attach all match the clients.
 
+**object storage (closed beta)** **(from the backend handlers 2026-11-20, NOT verified live)**
+- `GET /object-storage` → `{enabled, endpoint, beta}`. An organization outside the beta is refused with `403 OBJECT_STORAGE_NOT_ENABLED` on writes (lists answer empty when the store is off).
+- Buckets: `GET|POST /buckets`, `GET|PATCH|DELETE /buckets/{id}` (ids `bkt_`). Create `{name, region?, quota_bytes?, versioning, object_lock, public_prefixes?}` answers `201` with the bucket plus `operation_id`; `state` is `provisioning`, `active`, `updating` (a change not yet applied), `deleting`, `failed` or `unknown`. PATCH takes any of `quota_bytes`, `versioning`, `public_prefixes` (replaces; `[]` is private) and answers `200` with a nullable `operation_id`. DELETE `?force=true` empties a non-empty bucket (else `409 BUCKET_NOT_EMPTY`) and answers `202`; the bucket then reads as `deleting` until purged. Names are global (`409 BUCKET_NAME_TAKEN`). Billed per MiB-hour stored (500 naira per GiB-month).
+- Keys: `GET|POST /object-storage/keys`, `DELETE /object-storage/keys/{id}` (ids `osk_`, `204`). No single GET. Create `{name, region?, read_only, buckets?}` answers `201` with `secret_access_key` and `endpoint`, once; create is not replayed, so the client does not retry it.
+- 404 codes `BUCKET_NOT_FOUND`, `OBJECT_STORAGE_KEY_NOT_FOUND` count as `ErrNotFound`.
+
 ## Build order
 
 1. Client plus `pantechdynamics_ssh_key` (proves the whole pipeline end to end). **Done.**
@@ -320,7 +326,8 @@ Paths above are relative to the base URL.
 10. Teams and access policies: `pantechdynamics_team`, `_team_membership`, `_access_policy` (blocks or `policy_json`), `_access_policy_attachment`, `_access_settings` (state-only destroy), and the `access_policy`, `iam_actions`, `access_policy_document` data sources. **Written from the contract and backend domain code with unit tests and an end-to-end run against an in-memory fake, not verified live.**
 11. Certificates: `pantechdynamics_certificate` (waits for issuance; CNAME `validation_records`), `pantechdynamics_certificate_import` (key in state; re-import in place), the `pantechdynamics_certificate_export` ephemeral resource (the recommended export: the key never reaches plan or state), and the `certificate`, `certificate_export` (older Terraform; key in state) data sources. **Written against the real handlers with unit tests and an end-to-end run against an in-memory fake, not verified live.**
 12. v0.7.0 prepared 2026-11-10 (CHANGELOG heading; merging to main tags and releases it): DNS on Pantech's own name servers, .ng domains, the domain payment stop, HTTPS load balancers.
-13. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
+13. Object storage (closed beta): `pantechdynamics_bucket` (`force_destroy`) and `pantechdynamics_object_storage_key` (secret in state). **Written from the backend handlers with unit tests, not verified live.**
+14. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
 
 ## Do not
 

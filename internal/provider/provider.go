@@ -24,6 +24,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesspolicy"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesspolicyattachment"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/accesssettings"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/bucket"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificate"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificateimport"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/containerrepository"
@@ -39,6 +40,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetesnodepool"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/loadbalancer"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/network"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/objectstoragekey"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/portforward"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/publicip"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/registrynamespace"
@@ -214,6 +216,7 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		accesssettings.New,
 		certificate.New,
 		certificateimport.New,
+		bucket.New,
 		containerrepository.New,
 		database.New,
 		databasesnapshot.New,
@@ -222,6 +225,7 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		domain.New,
 		firewallrule.New,
 		registrynamespace.New,
+		objectstoragekey.New,
 		registrytoken.New,
 		instance.New,
 		kubernetescluster.New,

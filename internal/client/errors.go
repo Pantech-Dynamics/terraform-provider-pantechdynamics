@@ -61,6 +61,8 @@ var notFoundCodes = map[string]bool{
 	CodeIAMPolicyNotFound:         true,
 	CodeIAMAttachmentNotFound:     true,
 	CodeCertificateNotFound:       true,
+	CodeBucketNotFound:            true,
+	CodeObjectStorageKeyNotFound:  true,
 }
 
 // FieldError is one entry of a 422 validation failure.
