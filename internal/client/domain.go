@@ -141,8 +141,9 @@ type TLDOffer struct {
 	PrivacyAlwaysOn bool `json:"privacy_always_on"`
 }
 
-// RegisterDomainRequest buys a domain. AcceptTerms must be true: the backend
-// refuses the order otherwise. AutoRenew and Privacy are pointers so false is
+// RegisterDomainRequest buys a domain. AcceptTerms must be true (the
+// registrant accepts the Domain Registration Agreement,
+// https://pantechdynamics.com/legal/domain-registration): the backend refuses the order otherwise. AutoRenew and Privacy are pointers so false is
 // sent, not dropped.
 type RegisterDomainRequest struct {
 	Name        string        `json:"name"`

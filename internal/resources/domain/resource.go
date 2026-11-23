@@ -131,7 +131,7 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:  []validator.Set{nameServerList{}},
 			},
 			"accept_terms": schema.BoolAttribute{
-				Description: "Must be true: you accept the registration terms. " + warnNoUndo + " Changing it later does nothing.",
+				Description: "Must be true: the registrant accepts the Domain Registration Agreement (https://pantechdynamics.com/legal/domain-registration). " + warnNoUndo + " Changing it later does nothing.",
 				Required:    true,
 				Validators:  []validator.Bool{mustBeTrue{}},
 			},

@@ -52,7 +52,7 @@ resource "pantechdynamics_dns_zone" "example" {
 
 ### Required
 
-- `accept_terms` (Boolean) Must be true: you accept the registration terms. Registering a domain charges your organization's credit and cannot be undone. Changing it later does nothing.
+- `accept_terms` (Boolean) Must be true: the registrant accepts the Domain Registration Agreement (https://pantechdynamics.com/legal/domain-registration). Registering a domain charges your organization's credit and cannot be undone. Changing it later does nothing.
 - `contact` (Attributes, Sensitive) The registrant: the person or company who holds the domain. It is personal data, so the block is sensitive. A change is sent to the registrar. A change made outside Terraform is not detected. (see [below for nested schema](#nestedatt--contact))
 - `name` (String) The domain to register, in lower case without a trailing dot, such as "example.com". Changing it registers another domain (and buys it); the old one stays in your organization.
 
