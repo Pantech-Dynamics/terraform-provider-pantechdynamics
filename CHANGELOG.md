@@ -7,6 +7,10 @@ FEATURES:
 - **New resource:** `pantechdynamics_bucket`, an S3-compatible object storage bucket (closed beta; an organization outside it gets `OBJECT_STORAGE_NOT_ENABLED` with a hint). `name` (checked at plan time; shared by every customer), `region` and `object_lock` replace it; `quota_bytes` (0 is no limit), `versioning` and `public_prefixes` change in place and wait until applied. Read-only `endpoint`, `state`, `created_at`. `force_destroy` (default `false`) lets destroy delete the objects too; without it a non-empty bucket cannot be destroyed. Storage is billed per GiB stored, measured hourly. Import by id (`bkt_...`) or name. `timeouts` for create, update and delete.
 - **New resource:** `pantechdynamics_object_storage_key`, an S3 access key, optionally `read_only` and limited to `buckets`. Every argument replaces it. **The secret is shown only at create and is kept in state as the sensitive `secret_access_key`.** A key revoked outside Terraform is removed from state. Destroy revokes it. Import by id (`osk_...`), with the secret null.
 
+ENHANCEMENTS:
+
+- `pantechdynamics_domain`: the `accept_terms` description names the Domain Registration Agreement and links it (https://pantechdynamics.com/legal/domain-registration).
+
 BUG FIXES:
 
 - `pantechdynamics_public_ip`: when no public address can be attached, the API now answers `PUBLIC_IP_UNAVAILABLE`; the error says to try again later and keeps the failed address in state so the next apply replaces it (`IP_POOL_EXHAUSTED` from older API versions is handled the same way).
