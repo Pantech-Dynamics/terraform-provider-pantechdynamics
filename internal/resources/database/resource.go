@@ -126,12 +126,21 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Validators:    []validator.String{resourcekit.IDPrefix("subnet", "snet_")},
 			},
 			"admin_username": schema.StringAttribute{
-				Description:   "Admin login to connect with: 3 to 32 lowercase letters, digits or underscores, starting with a letter. Reserved names are refused: root, postgres, public, none, all, user, sys, system, replication, current_user, current_role and session_user, and any name starting with pg_, mysql, mariadb or pantech. Defaults to \"dbadmin\". It is not a superuser: on PostgreSQL and MySQL it can create further users and databases; on MariaDB it is the only login. Changing it replaces the database.",
-				Optional:      true,
-				Computed:      true,
-				Default:       stringdefault.StaticString(client.DefaultDatabaseAdminUsername),
-				PlanModifiers: replace,
-				Validators:    []validator.String{adminUsernameValidator{}},
+				Description: "Admin login to connect with: 3 to 32 lowercase letters, digits or underscores, starting with a letter. Reserved names are refused: root, postgres, public, none, all, user, sys, system, replication, current_user, current_role and session_user, and any name starting with pg_, mysql, mariadb or pantech. Defaults to \"dbadmin\". It is not a superuser: on PostgreSQL and MySQL it can create further users and databases; on MariaDB it is the only login. Changing it replaces the database.",
+				Optional:    true,
+				Computed:    true,
+				// The backend assigns "dbadmin" when admin_username is omitted, and
+				// reports the login on read. UseStateForUnknown holds that value
+				// across a plan that omits it, and RequiresReplaceIfConfigured
+				// replaces the database only when a configured value changes, so an
+				// import or a removed argument no longer destroys it with its data.
+				// A static Default would be re-applied over the read value and force
+				// that destroy.
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
+				Validators: []validator.String{adminUsernameValidator{}},
 			},
 			"access_rules": schema.SetAttribute{
 				Description: "IPv4 CIDRs allowed to connect to the engine's port, at most 50, each /8 to /32 with its host bits clear (10.0.1.0/24, not 10.0.1.7/24) and each once (0.0.0.0/0 is refused). Together with the ranges security_group_ids adds, a database takes at most 1024 ranges. This is the database's own allow-list (security_group_ids can add more ranges; effective_access_rules shows the result): changing it replaces every rule in place, and removing a CIDR also ends connections already open from it. Omit it to keep the zone's default (the subnet's VPC CIDR in a VPC zone, none in a standard zone) and whatever the platform reports; set [] for no access.",
