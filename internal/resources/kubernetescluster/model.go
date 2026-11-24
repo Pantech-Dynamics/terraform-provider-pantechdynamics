@@ -305,6 +305,9 @@ func pendingModel(plan model, id string) model {
 	if m.Workers.IsUnknown() { // autoscaling chooses it
 		m.Workers = types.Int64Null()
 	}
+	if m.ControlNodes.IsUnknown() { // the backend assigns the default when omitted
+		m.ControlNodes = types.Int64Null()
+	}
 	m.Endpoint = types.StringNull()
 	m.VolumeStorageGB = types.Int64Null()
 	m.KubernetesVersion = types.StringNull()
