@@ -99,7 +99,7 @@ func TestPendingModelHasNoUnknownValues(t *testing.T) {
 		ID: types.StringUnknown(), Name: types.StringValue("web"), PlanSlug: types.StringValue("individual"), ImageSlug: types.StringValue("ubuntu-24-04"),
 		SSHKeyID: types.StringValue("sshk_1"), Region: types.StringUnknown(), SecurityGroupID: types.StringUnknown(), Tags: types.MapUnknown(types.StringType),
 		ObservedState: types.StringUnknown(), Zone: types.StringUnknown(), PublicIPv4: types.StringUnknown(), PrivateIPv4: types.StringUnknown(),
-		CreatedAt: types.StringUnknown(), UpdatedAt: types.StringUnknown(),
+		DynamicIP: types.ObjectUnknown(dynamicIPAttrTypes), CreatedAt: types.StringUnknown(), UpdatedAt: types.StringUnknown(),
 	}
 
 	m := pendingModel(plan, "vm_9")
@@ -110,7 +110,7 @@ func TestPendingModelHasNoUnknownValues(t *testing.T) {
 	}{
 		{"id", m.ID}, {"region", m.Region}, {"security_group_id", m.SecurityGroupID}, {"tags", m.Tags}, {"observed_state", m.ObservedState},
 		{"zone", m.Zone}, {"public_ipv4", m.PublicIPv4}, {"private_ipv4", m.PrivateIPv4}, {"created_at", m.CreatedAt}, {"updated_at", m.UpdatedAt},
-		{"encrypted", m.Encrypted},
+		{"encrypted", m.Encrypted}, {"dynamic_ip", m.DynamicIP},
 	}
 	for _, u := range unknowns {
 		if u.v.IsUnknown() {

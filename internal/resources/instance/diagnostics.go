@@ -20,6 +20,24 @@ var settableFields = map[string]bool{
 	"subnet_id": true, "network_id": true, "encrypted": true,
 }
 
+// fieldPath maps a 422 field name to a schema path, or false if the schema has
+// no matching attribute.
+func fieldPath(field string) (path.Path, bool) {
+	if settableFields[field] {
+		return path.Root(field), true
+	}
+	switch field {
+	case "address_rotation":
+		return path.Root("dynamic_ip"), true
+	case "address_rotation.schedule":
+		return path.Root("dynamic_ip").AtName("schedule"), true
+	case "address_rotation.connections":
+		return path.Root("dynamic_ip").AtName("connections"), true
+	default:
+		return path.Path{}, false
+	}
+}
+
 // addAPIError reports a client error. A 422 whose fields the schema has points at
 // each attribute. Anything else becomes one diagnostic that includes the
 // request_id.
@@ -27,7 +45,8 @@ func addAPIError(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && len(apiErr.Errors) > 0 && allSettable(apiErr.Errors) {
 		for _, fe := range apiErr.Errors {
-			diags.AddAttributeError(path.Root(fe.Field), summary, apiErr.FieldDetail(fe))
+			p, _ := fieldPath(fe.Field)
+			diags.AddAttributeError(p, summary, apiErr.FieldDetail(fe))
 		}
 		return
 	}
@@ -36,7 +55,7 @@ func addAPIError(diags *diag.Diagnostics, summary string, err error) {
 
 func allSettable(fields []client.FieldError) bool {
 	for _, fe := range fields {
-		if !settableFields[fe.Field] {
+		if _, ok := fieldPath(fe.Field); !ok {
 			return false
 		}
 	}
@@ -51,7 +70,22 @@ func addCreateError(diags *diag.Diagnostics, err error) {
 			err.Error()+"\n\nNothing was ordered and nothing was charged. Top up your credit or add a card to the account, then apply again.")
 		return
 	}
+	for code, hint := range dynamicIPCreateHints {
+		if client.HasCode(err, code) {
+			diags.AddAttributeError(path.Root("dynamic_ip"), "Error creating instance with Dynamic IP", err.Error()+"\n\n"+hint)
+			return
+		}
+	}
 	addAPIError(diags, "Error creating instance", err)
+}
+
+var dynamicIPCreateHints = map[string]string{
+	client.CodeAddressRotationNotEnabled:          "Dynamic IP is not enabled for your organization yet. Remove dynamic_ip or contact Pantech Dynamics support.",
+	client.CodeAddressRotationNeedsPrivateNetwork: "Dynamic IP requires a standard instance in a zone that supports private networking.",
+	client.CodeAddressRotationNeedsAgent:          "Dynamic IP requires an image that supports the platform agent. Choose a supported image or remove dynamic_ip.",
+	client.CodeAddressRotationNeedsSecurityGroup:  "Dynamic IP requires a security group whose inbound rules exclude the zone's private network. Narrow the ingress rules on security_group_id and apply again.",
+	client.CodeAddressRotationNoAddress:           "No rotating public IP addresses are currently available in this zone. Try again later or remove dynamic_ip.",
+	client.CodeAddressRotationUnavailable:         "Dynamic IP is not available in this region.",
 }
 
 // addDeleteError explains the refusals a user can act on.

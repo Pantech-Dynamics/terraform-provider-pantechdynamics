@@ -98,6 +98,7 @@ func TestAPIErrorIs(t *testing.T) {
 		{"deleted policy", &APIError{Status: 404, Code: "IAM_POLICY_NOT_FOUND"}, true, false},
 		{"detached policy", &APIError{Status: 404, Code: "IAM_ATTACHMENT_NOT_FOUND"}, true, false},
 		{"deleted certificate", &APIError{Status: 404, Code: "CERTIFICATE_NOT_FOUND"}, true, false},
+		{"missing dynamic ip", &APIError{Status: 404, Code: "ADDRESS_ROTATION_NOT_FOUND"}, true, false},
 		{"namespace not claimed is not a missing resource", &APIError{Status: 404, Code: "REGISTRY_NAMESPACE_NOT_SET"}, false, false},
 		{"deleted webhook", &APIError{Status: 404, Code: "WEBHOOK_NOT_FOUND"}, true, false},
 		{"feature not offered is not a missing resource", &APIError{Status: 404, Code: "NOT_FOUND"}, false, false},

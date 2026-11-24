@@ -149,6 +149,7 @@ output "app_private_network_ip" {
 ### Optional
 
 - `desired_state` (String) Whether the instance should be "running" or "stopped". Defaults to "running". Changing it starts or stops the instance in place. A stopped instance is billed for storage only. The provider never asks for a state the instance is already in, because the API fails that operation and leaves the instance failed.
+- `dynamic_ip` (Attributes) Creation-time option that enables Dynamic IP (a rotating outbound public IPv4 address) as soon as the instance starts. Requires a standard instance (no subnet_id or network_id), a supported image, and an explicit security_group_id whose inbound rules exclude the zone's private network. The upfront payment includes the schedule's surcharge: every_12_hours (+60%), daily (+50%), weekly (+40%), or monthly (+30%). Changing or removing this attribute replaces the instance. To manage Dynamic IP independently or change its schedule in place without replacing the instance, use the pantechdynamics_dynamic_ip resource instead, and do not manage Dynamic IP for the same instance in both places. (see [below for nested schema](#nestedatt--dynamic_ip))
 - `encrypted` (Boolean) Whether the instance's disk, snapshots and backups are encrypted at rest, with a key of its own. Set true to create the encrypted version of image_slug (refused with ENCRYPTION_NOT_SUPPORTED when the image has none available to you), or name an encrypted image (encrypted = true in pantechdynamics_images) directly. An encrypted instance needs outbound access to Pantech's key servers at every boot. Left out, the image decides. Changing it replaces the instance.
 - `network_id` (String) Id of the VPC network the instance is in. It follows from subnet_id, so it is normally left unset. Changing it replaces the instance.
 - `private_network` (Boolean) Whether the instance has a second network interface on its zone's private database network, so it can reach managed databases by their private address. Standard instances only (no subnet_id), in a zone that has the network. Changing it attaches or detaches the interface in place, without a restart, on a running or stopped instance. Omit it to leave the interface as it is. The instance's security group must let in nothing from the private network's range (private_network_cidr of the zone's standard placement in pantechdynamics_region, 10.250.0.0/20 in af-abj-1 today), including through 0.0.0.0/0 or ICMP rules, because a group applies to every interface: the API refuses the attach with SECURITY_GROUP_ALLOWS_PRIVATE_NETWORK and names the rules to narrow, and while attached it refuses rule changes and group changes that would let the range in. Inside the guest the interface stays down until configured: on Ubuntu add it to netplan with dhcp4: true and dhcp4-overrides {use-routes: false, use-dns: false}, then netplan apply.
@@ -170,6 +171,18 @@ output "app_private_network_ip" {
 - `public_ipv4` (String) Public IPv4 address, or null when the instance has none.
 - `updated_at` (String) When the instance was last changed, in RFC 3339 UTC, to the second.
 - `zone` (String) Zone the instance runs in, for example af-abj-1.
+
+<a id="nestedatt--dynamic_ip"></a>
+### Nested Schema for `dynamic_ip`
+
+Required:
+
+- `schedule` (String) How often the outbound public address rotates: "every_12_hours", "daily", "weekly", or "monthly".
+
+Optional:
+
+- `connections` (String) How open outbound connections behave on rotation: "keep" (default) lets open connections finish on the previous address; "move" switches them immediately.
+
 
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`

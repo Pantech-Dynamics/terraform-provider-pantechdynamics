@@ -41,11 +41,15 @@ output "uploads_endpoint" {
 
 ### Optional
 
+- `cors_rules` (Attributes List) Cross-origin resource sharing (CORS) rules on the bucket. Leave it out for no CORS rules. Changes in place. (see [below for nested schema](#nestedatt--cors_rules))
+- `default_object_lock` (Attributes) Default object-lock retention applied to new objects. Requires object_lock = true. Leave it out for no default retention. Changes in place. (see [below for nested schema](#nestedatt--default_object_lock))
 - `force_destroy` (Boolean) When true, destroying the bucket deletes every object in it. When false (the default) a bucket that holds objects cannot be destroyed. Terraform only; not sent to the API until destroy.
+- `lifecycle_rules` (Attributes List) Automatic expiration and multipart cleanup rules on the bucket. Leave it out for no lifecycle rules. Changes in place. (see [below for nested schema](#nestedatt--lifecycle_rules))
 - `object_lock` (Boolean) Allow retention on objects. Defaults to false. It cannot be turned off, so changing it replaces the bucket.
 - `public_prefixes` (Set of String) Key prefixes anyone may read without a key, such as "public/". Leave it out for a wholly private bucket. Changes in place.
 - `quota_bytes` (Number) Size limit in bytes; writes beyond it are refused. 0 (the default) is no limit. Changes in place.
 - `region` (String) Region code, such as "af-abj". Leave it out for the default region. Changing it replaces the bucket.
+- `tags` (Map of String) Key-value tags on the bucket. Leave it out for no tags. Changes in place.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `versioning` (Boolean) Keep earlier versions of objects. Defaults to false. Changes in place; turning it off suspends versioning and keeps the versions already stored.
 
@@ -55,6 +59,47 @@ output "uploads_endpoint" {
 - `endpoint` (String) The S3 endpoint URL for this bucket's region.
 - `id` (String) Identifier of the bucket, starting with bkt_.
 - `state` (String) "provisioning", "active", "updating", "deleting", "failed" or "unknown".
+
+<a id="nestedatt--cors_rules"></a>
+### Nested Schema for `cors_rules`
+
+Required:
+
+- `allowed_methods` (List of String) HTTP methods allowed: "GET", "PUT", "POST", "DELETE", or "HEAD".
+- `allowed_origins` (List of String) Origins allowed to make cross-origin requests, such as "https://app.example.com" or "*".
+
+Optional:
+
+- `allowed_headers` (List of String) Headers allowed in preflight requests. Defaults to an empty list.
+- `expose_headers` (List of String) Response headers exposed to browsers, such as "ETag". Defaults to an empty list.
+- `id` (String) Optional identifier for the rule.
+- `max_age_seconds` (Number) How long browsers may cache preflight responses, in seconds. Defaults to 0.
+
+
+<a id="nestedatt--default_object_lock"></a>
+### Nested Schema for `default_object_lock`
+
+Optional:
+
+- `days` (Number) Default retention period in days. Set either days or years when enabled is true.
+- `enabled` (Boolean) Whether default retention is active. Defaults to true.
+- `mode` (String) Default retention mode: "GOVERNANCE" or "COMPLIANCE". Required when enabled is true.
+- `years` (Number) Default retention period in years. Set either days or years when enabled is true.
+
+
+<a id="nestedatt--lifecycle_rules"></a>
+### Nested Schema for `lifecycle_rules`
+
+Optional:
+
+- `abort_incomplete_multipart_days` (Number) Days before incomplete multipart uploads are aborted. 0 disables multipart cleanup.
+- `enabled` (Boolean) Whether the rule is active. Defaults to true.
+- `expiration_days` (Number) Days after creation before current objects expire. 0 disables current-object expiration.
+- `expired_object_delete_marker` (Boolean) Remove expired object delete markers when no noncurrent versions remain. Defaults to false.
+- `id` (String) Identifier for the rule.
+- `noncurrent_expiration_days` (Number) Days before noncurrent versions expire. 0 disables noncurrent expiration.
+- `prefix` (String) Key prefix the rule applies to. Empty applies to the whole bucket.
+
 
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`

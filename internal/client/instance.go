@@ -127,6 +127,8 @@ type CreateInstanceRequest struct {
 	// Encrypted, when not nil, asks for image_slug's encrypted version (true)
 	// or the image as named (false). Nil leaves it to the image.
 	Encrypted *bool `json:"encrypted,omitempty"`
+	// AddressRotation turns on Dynamic IP once the instance starts.
+	AddressRotation *CreateInstanceDynamicIP `json:"address_rotation,omitempty"`
 }
 
 // renameRequest changes an instance's name.

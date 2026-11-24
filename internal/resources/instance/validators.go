@@ -66,16 +66,19 @@ func (v oneOf) ValidateString(_ context.Context, req validator.StringRequest, re
 	}
 }
 
-// ValidateConfig rejects a security group, or the private database network, on
-// a VPC instance. The platform
-// refuses it (SECURITY_GROUPS_NOT_SUPPORTED_IN_ZONE) only after the order is
-// placed, and a refused order can still reserve credit, so it stops at plan time.
+// ValidateConfig rejects a security group, the private database network, or
+// dynamic_ip on a VPC instance, and requires security_group_id when dynamic_ip
+// is set. The platform refuses these only after the order is placed, and a
+// refused order can still reserve credit, so they stop at plan time.
 func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var subnet, group types.String
+	var subnet, network, group types.String
 	var privateNetwork types.Bool
+	var dynamicIP types.Object
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subnet_id"), &subnet)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("network_id"), &network)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("security_group_id"), &group)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, pathPrivateNetwork, &privateNetwork)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("dynamic_ip"), &dynamicIP)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -85,6 +88,16 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 	if !subnet.IsNull() && !group.IsNull() {
 		resp.Diagnostics.AddAttributeError(path.Root("security_group_id"), "security_group_id not allowed in a VPC",
 			"An instance in a subnet is protected by the subnet's firewall rules, not a security group. Remove security_group_id, or remove subnet_id for a standard instance.")
+	}
+	if !dynamicIP.IsNull() {
+		if !subnet.IsNull() || !network.IsNull() {
+			resp.Diagnostics.AddAttributeError(path.Root("dynamic_ip"), "dynamic_ip not allowed in a VPC",
+				"Dynamic IP is available only on standard instances. Remove dynamic_ip, or remove subnet_id and network_id.")
+		}
+		if group.IsNull() || (!group.IsUnknown() && strings.TrimSpace(group.ValueString()) == "") {
+			resp.Diagnostics.AddAttributeError(path.Root("dynamic_ip"), "dynamic_ip requires security_group_id",
+				"Dynamic IP requires an explicit security_group_id whose inbound rules exclude the zone's private network. Set security_group_id, or remove dynamic_ip.")
+		}
 	}
 }
 
