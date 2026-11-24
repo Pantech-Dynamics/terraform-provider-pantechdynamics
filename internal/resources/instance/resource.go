@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -196,6 +197,36 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Description:   "Address of the private database network interface once attached, or null. Allow it on a pantechdynamics_database as a /32 in access_rules.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{privateIPFollowsAttachment{}},
+			},
+			"dynamic_ip": schema.SingleNestedAttribute{
+				Description: "Creation-time option that enables Dynamic IP (a rotating outbound public IPv4 address) as soon as the instance starts. " +
+					"Requires a standard instance (no subnet_id or network_id), a supported image, and an explicit security_group_id whose inbound rules exclude the zone's private network. " +
+					"The upfront payment includes the schedule's surcharge: every_12_hours (+60%), daily (+50%), weekly (+40%), or monthly (+30%). " +
+					"Changing or removing this attribute replaces the instance. To manage Dynamic IP independently or change its schedule in place without replacing the instance, use the pantechdynamics_dynamic_ip resource instead, and do not manage Dynamic IP for the same instance in both places.",
+				Optional:      true,
+				PlanModifiers: []planmodifier.Object{objectplanmodifier.RequiresReplace()},
+				Attributes: map[string]schema.Attribute{
+					"schedule": schema.StringAttribute{
+						Description: "How often the outbound public address rotates: \"every_12_hours\", \"daily\", \"weekly\", or \"monthly\".",
+						Required:    true,
+						Validators: []validator.String{oneOf{allowed: []string{
+							client.DynamicIPScheduleEvery12Hours,
+							client.DynamicIPScheduleDaily,
+							client.DynamicIPScheduleWeekly,
+							client.DynamicIPScheduleMonthly,
+						}}},
+					},
+					"connections": schema.StringAttribute{
+						Description: "How open outbound connections behave on rotation: \"keep\" (default) lets open connections finish on the previous address; \"move\" switches them immediately.",
+						Optional:    true,
+						Computed:    true,
+						Default:     stringdefault.StaticString(client.DynamicIPConnectionsKeep),
+						Validators: []validator.String{oneOf{allowed: []string{
+							client.DynamicIPConnectionsKeep,
+							client.DynamicIPConnectionsMove,
+						}}},
+					},
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Description:   "When the instance was created, in RFC 3339 UTC, to the second.",

@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
+	dsbucket "github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/bucket"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/certificates"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/containerrepositories"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/databaseengines"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/dnsrecords"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/domaintlds"
+	dsdynamicip "github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/dynamicip"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/iam"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/images"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/kubernetesversions"
@@ -33,6 +35,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/dnsrecord"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/dnszone"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/domain"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/dynamicip"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/firewallrule"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/instance"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/kubernetesaddon"
@@ -223,6 +226,7 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		dnsrecord.New,
 		dnszone.New,
 		domain.New,
+		dynamicip.New,
 		firewallrule.New,
 		registrynamespace.New,
 		objectstoragekey.New,
@@ -258,6 +262,7 @@ func (p *PantechDynamicsProvider) EphemeralResources(_ context.Context) []func()
 // DataSources lists the data sources this provider offers.
 func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		dsbucket.New,
 		certificates.New,
 		certificates.NewExport,
 		containerrepositories.New,
@@ -269,6 +274,7 @@ func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() dataso
 		iam.NewPolicy,
 		dnsrecords.New,
 		domaintlds.New,
+		dsdynamicip.New,
 		images.New,
 		images.NewSingle,
 		kubernetesversions.New,

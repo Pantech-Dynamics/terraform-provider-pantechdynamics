@@ -28,6 +28,19 @@ func TestWritesRetryOnlyWhenTheSpecSaysTheyReplay(t *testing.T) {
 		{"database password", func(c *Client) error { _, err := c.ChangeDatabasePassword(ctx, "db_1", "x"); return err }, 2},
 		{"ssh key create", func(c *Client) error { _, err := c.CreateSSHKey(ctx, CreateSSHKeyRequest{Name: "k"}); return err }, 1},
 		{"ssh key delete", func(c *Client) error { return c.DeleteSSHKey(ctx, "sshk_1") }, 1},
+		{"dynamic ip put", func(c *Client) error {
+			_, err := c.PutDynamicIP(ctx, "vm_1", PutDynamicIPRequest{Schedule: DynamicIPScheduleDaily})
+			return err
+		}, 2},
+		{"dynamic ip delete", func(c *Client) error { _, err := c.DeleteDynamicIP(ctx, "vm_1"); return err }, 2},
+		{"dynamic ip rotate", func(c *Client) error { _, err := c.RotateDynamicIP(ctx, "vm_1"); return err }, 1},
+		{"bucket cors put", func(c *Client) error { _, err := c.PutBucketCORS(ctx, "bkt_1", nil); return err }, 2},
+		{"bucket lifecycle put", func(c *Client) error { _, err := c.PutBucketLifecycle(ctx, "bkt_1", nil); return err }, 2},
+		{"bucket tags put", func(c *Client) error { _, err := c.PutBucketTags(ctx, "bkt_1", nil); return err }, 2},
+		{"bucket object lock put", func(c *Client) error {
+			_, err := c.PutBucketObjectLock(ctx, "bkt_1", BucketObjectLock{Enabled: false})
+			return err
+		}, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

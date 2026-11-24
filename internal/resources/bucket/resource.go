@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,7 +19,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -44,14 +47,23 @@ type bucketAPI interface {
 	ListBuckets(ctx context.Context) ([]client.Bucket, error)
 	UpdateBucket(ctx context.Context, id string, req client.UpdateBucketRequest) (*client.Bucket, error)
 	DeleteBucket(ctx context.Context, id string, force bool) error
+	GetBucketCORS(ctx context.Context, id string) ([]client.BucketCORSRule, error)
+	PutBucketCORS(ctx context.Context, id string, rules []client.BucketCORSRule) ([]client.BucketCORSRule, error)
+	GetBucketLifecycle(ctx context.Context, id string) ([]client.BucketLifecycleRule, error)
+	PutBucketLifecycle(ctx context.Context, id string, rules []client.BucketLifecycleRule) ([]client.BucketLifecycleRule, error)
+	GetBucketTags(ctx context.Context, id string) ([]client.BucketTag, error)
+	PutBucketTags(ctx context.Context, id string, tags []client.BucketTag) ([]client.BucketTag, error)
+	GetBucketObjectLock(ctx context.Context, id string) (*client.BucketObjectLock, error)
+	PutBucketObjectLock(ctx context.Context, id string, cfg client.BucketObjectLock) (*client.BucketObjectLock, error)
 	GetOperation(ctx context.Context, id string) (*client.Operation, error)
 	WaitUntil(ctx context.Context, what string, done client.DoneCheck) error
 }
 
 var (
-	_ resource.Resource                = &Resource{}
-	_ resource.ResourceWithConfigure   = &Resource{}
-	_ resource.ResourceWithImportState = &Resource{}
+	_ resource.Resource                   = &Resource{}
+	_ resource.ResourceWithConfigure      = &Resource{}
+	_ resource.ResourceWithImportState    = &Resource{}
+	_ resource.ResourceWithValidateConfig = &Resource{}
 )
 
 // Resource manages one bucket.
@@ -64,18 +76,22 @@ func New() resource.Resource { return &Resource{} }
 
 // model maps the resource's attributes to Go.
 type model struct {
-	ID             types.String   `tfsdk:"id"`
-	Name           types.String   `tfsdk:"name"`
-	Region         types.String   `tfsdk:"region"`
-	QuotaBytes     types.Int64    `tfsdk:"quota_bytes"`
-	Versioning     types.Bool     `tfsdk:"versioning"`
-	ObjectLock     types.Bool     `tfsdk:"object_lock"`
-	PublicPrefixes types.Set      `tfsdk:"public_prefixes"`
-	ForceDestroy   types.Bool     `tfsdk:"force_destroy"`
-	Endpoint       types.String   `tfsdk:"endpoint"`
-	State          types.String   `tfsdk:"state"`
-	CreatedAt      types.String   `tfsdk:"created_at"`
-	Timeouts       timeouts.Value `tfsdk:"timeouts"`
+	ID                types.String   `tfsdk:"id"`
+	Name              types.String   `tfsdk:"name"`
+	Region            types.String   `tfsdk:"region"`
+	QuotaBytes        types.Int64    `tfsdk:"quota_bytes"`
+	Versioning        types.Bool     `tfsdk:"versioning"`
+	ObjectLock        types.Bool     `tfsdk:"object_lock"`
+	PublicPrefixes    types.Set      `tfsdk:"public_prefixes"`
+	Tags              types.Map      `tfsdk:"tags"`
+	CORSRules         types.List     `tfsdk:"cors_rules"`
+	LifecycleRules    types.List     `tfsdk:"lifecycle_rules"`
+	DefaultObjectLock types.Object   `tfsdk:"default_object_lock"`
+	ForceDestroy      types.Bool     `tfsdk:"force_destroy"`
+	Endpoint          types.String   `tfsdk:"endpoint"`
+	State             types.String   `tfsdk:"state"`
+	CreatedAt         types.String   `tfsdk:"created_at"`
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 }
 
 // Metadata sets the type name: pantechdynamics_bucket.
@@ -85,6 +101,7 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 
 // Schema describes the attributes.
 func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	emptyStringList := listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{}))
 	resp.Schema = schema.Schema{
 		Description: "An S3-compatible object storage bucket. Object storage is in closed beta: an organization outside it is refused with OBJECT_STORAGE_NOT_ENABLED. " +
 			"Storage is billed per GiB stored, measured hourly; data out and requests are free during the beta. Reach the bucket with any S3 tool at `endpoint`, " +
@@ -132,6 +149,142 @@ func (r *Resource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *r
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"tags": schema.MapAttribute{
+				Description: "Key-value tags on the bucket. Leave it out for no tags. Changes in place.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"cors_rules": schema.ListNestedAttribute{
+				Description: "Cross-origin resource sharing (CORS) rules on the bucket. Leave it out for no CORS rules. Changes in place.",
+				Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							Description: "Optional identifier for the rule.",
+							Optional:    true,
+							Computed:    true,
+							Default:     stringdefault.StaticString(""),
+						},
+						"allowed_origins": schema.ListAttribute{
+							Description: "Origins allowed to make cross-origin requests, such as \"https://app.example.com\" or \"*\".",
+							Required:    true,
+							ElementType: types.StringType,
+						},
+						"allowed_methods": schema.ListAttribute{
+							Description: "HTTP methods allowed: \"GET\", \"PUT\", \"POST\", \"DELETE\", or \"HEAD\".",
+							Required:    true,
+							ElementType: types.StringType,
+						},
+						"allowed_headers": schema.ListAttribute{
+							Description: "Headers allowed in preflight requests. Defaults to an empty list.",
+							Optional:    true,
+							Computed:    true,
+							ElementType: types.StringType,
+							Default:     emptyStringList,
+						},
+						"expose_headers": schema.ListAttribute{
+							Description: "Response headers exposed to browsers, such as \"ETag\". Defaults to an empty list.",
+							Optional:    true,
+							Computed:    true,
+							ElementType: types.StringType,
+							Default:     emptyStringList,
+						},
+						"max_age_seconds": schema.Int64Attribute{
+							Description: "How long browsers may cache preflight responses, in seconds. Defaults to 0.",
+							Optional:    true,
+							Computed:    true,
+							Default:     int64default.StaticInt64(0),
+							Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+						},
+					},
+				},
+			},
+			"lifecycle_rules": schema.ListNestedAttribute{
+				Description: "Automatic expiration and multipart cleanup rules on the bucket. Leave it out for no lifecycle rules. Changes in place.",
+				Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							Description: "Identifier for the rule.",
+							Optional:    true,
+							Computed:    true,
+							Default:     stringdefault.StaticString(""),
+						},
+						"prefix": schema.StringAttribute{
+							Description: "Key prefix the rule applies to. Empty applies to the whole bucket.",
+							Optional:    true,
+							Computed:    true,
+							Default:     stringdefault.StaticString(""),
+						},
+						"enabled": schema.BoolAttribute{
+							Description: "Whether the rule is active. Defaults to true.",
+							Optional:    true,
+							Computed:    true,
+							Default:     booldefault.StaticBool(true),
+						},
+						"expiration_days": schema.Int64Attribute{
+							Description: "Days after creation before current objects expire. 0 disables current-object expiration.",
+							Optional:    true,
+							Computed:    true,
+							Default:     int64default.StaticInt64(0),
+							Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+						},
+						"noncurrent_expiration_days": schema.Int64Attribute{
+							Description: "Days before noncurrent versions expire. 0 disables noncurrent expiration.",
+							Optional:    true,
+							Computed:    true,
+							Default:     int64default.StaticInt64(0),
+							Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+						},
+						"abort_incomplete_multipart_days": schema.Int64Attribute{
+							Description: "Days before incomplete multipart uploads are aborted. 0 disables multipart cleanup.",
+							Optional:    true,
+							Computed:    true,
+							Default:     int64default.StaticInt64(0),
+							Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+						},
+						"expired_object_delete_marker": schema.BoolAttribute{
+							Description: "Remove expired object delete markers when no noncurrent versions remain. Defaults to false.",
+							Optional:    true,
+							Computed:    true,
+							Default:     booldefault.StaticBool(false),
+						},
+					},
+				},
+			},
+			"default_object_lock": schema.SingleNestedAttribute{
+				Description: "Default object-lock retention applied to new objects. Requires object_lock = true. Leave it out for no default retention. Changes in place.",
+				Optional:    true,
+				Attributes: map[string]schema.Attribute{
+					"enabled": schema.BoolAttribute{
+						Description: "Whether default retention is active. Defaults to true.",
+						Optional:    true,
+						Computed:    true,
+						Default:     booldefault.StaticBool(true),
+					},
+					"mode": schema.StringAttribute{
+						Description: "Default retention mode: \"GOVERNANCE\" or \"COMPLIANCE\". Required when enabled is true.",
+						Optional:    true,
+						Computed:    true,
+						Default:     stringdefault.StaticString(""),
+						Validators:  []validator.String{resourcekit.OneOf("", client.ObjectLockModeGovernance, client.ObjectLockModeCompliance)},
+					},
+					"days": schema.Int64Attribute{
+						Description: "Default retention period in days. Set either days or years when enabled is true.",
+						Optional:    true,
+						Computed:    true,
+						Default:     int64default.StaticInt64(0),
+						Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+					},
+					"years": schema.Int64Attribute{
+						Description: "Default retention period in years. Set either days or years when enabled is true.",
+						Optional:    true,
+						Computed:    true,
+						Default:     int64default.StaticInt64(0),
+						Validators:  []validator.Int64{resourcekit.IntBetween(0, 1<<31-1)},
+					},
+				},
+			},
 			"force_destroy": schema.BoolAttribute{
 				Description: "When true, destroying the bucket deletes every object in it. When false (the default) a bucket that holds objects cannot be destroyed. Terraform only; not sent to the API until destroy.",
 				Optional:    true,
@@ -170,8 +323,9 @@ func (r *Resource) Configure(_ context.Context, req resource.ConfigureRequest, r
 	r.api = api
 }
 
-// Create adds the bucket, saves its id at once, and waits until the store
-// holds it.
+// Create adds the bucket, saves its id at once, waits until the store holds
+// it, and then applies any configured inline rules (tags, CORS, lifecycle,
+// default object lock).
 func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -196,13 +350,59 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 	// Saved before the wait, so a bucket that fails or times out is still
 	// tracked and the next apply can destroy it.
-	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, b, &resp.Diagnostics))...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, b, bucketRules{}, &resp.Diagnostics))...)
 	final, err := r.waitSettled(ctx, b)
 	if err != nil {
 		resourcekit.AddWaitError(&resp.Diagnostics, "Error creating bucket", kind, b.ID, err)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, final, &resp.Diagnostics))...)
+
+	applied, ruleErr := r.applyCreateRules(ctx, final.ID, plan, &resp.Diagnostics)
+	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, final, applied, &resp.Diagnostics))...)
+	if ruleErr != nil {
+		resourcekit.AddHintedAPIError(&resp.Diagnostics, "Error configuring bucket rules", ruleErr, attributeFor, hints)
+	}
+}
+
+func (r *Resource) applyCreateRules(ctx context.Context, id string, plan model, diags *diag.Diagnostics) (bucketRules, error) {
+	var applied bucketRules
+	tags, d := mapToTags(ctx, plan.Tags)
+	diags.Append(d...)
+	if len(tags) > 0 {
+		out, err := r.api.PutBucketTags(ctx, id, tags)
+		if err != nil {
+			return applied, err
+		}
+		applied.tags = out
+	}
+	cors, d := listToCORSRules(ctx, plan.CORSRules)
+	diags.Append(d...)
+	if len(cors) > 0 {
+		out, err := r.api.PutBucketCORS(ctx, id, cors)
+		if err != nil {
+			return applied, err
+		}
+		applied.cors = out
+	}
+	lc, d := listToLifecycleRules(ctx, plan.LifecycleRules)
+	diags.Append(d...)
+	if len(lc) > 0 {
+		out, err := r.api.PutBucketLifecycle(ctx, id, lc)
+		if err != nil {
+			return applied, err
+		}
+		applied.lifecycle = out
+	}
+	ol, olSet, d := objectToObjectLock(ctx, plan.DefaultObjectLock)
+	diags.Append(d...)
+	if olSet && ol.Enabled {
+		out, err := r.api.PutBucketObjectLock(ctx, id, ol)
+		if err != nil {
+			return applied, err
+		}
+		applied.objectLock = out
+	}
+	return applied, nil
 }
 
 // Read refreshes state from the API. A bucket deleted, or being deleted,
@@ -222,11 +422,49 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		resourcekit.AddHintedError(&resp.Diagnostics, "Error reading bucket", err, hints)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, state, b, &resp.Diagnostics))...)
+	rules, err := r.readRules(ctx, b)
+	if err != nil {
+		resourcekit.AddHintedError(&resp.Diagnostics, "Error reading bucket rules", err, hints)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, state, b, rules, &resp.Diagnostics))...)
 }
 
-// Update changes quota_bytes, versioning and public_prefixes in place, and
-// waits until the store has applied them.
+func (r *Resource) readRules(ctx context.Context, b *client.Bucket) (bucketRules, error) {
+	var rules bucketRules
+	if b.State != client.BucketActive {
+		return rules, nil
+	}
+	tags, err := r.api.GetBucketTags(ctx, b.ID)
+	if err != nil && !errors.Is(err, client.ErrNotFound) {
+		return rules, err
+	}
+	rules.tags = tags
+
+	cors, err := r.api.GetBucketCORS(ctx, b.ID)
+	if err != nil && !errors.Is(err, client.ErrNotFound) {
+		return rules, err
+	}
+	rules.cors = cors
+
+	lc, err := r.api.GetBucketLifecycle(ctx, b.ID)
+	if err != nil && !errors.Is(err, client.ErrNotFound) {
+		return rules, err
+	}
+	rules.lifecycle = lc
+
+	if b.ObjectLock {
+		ol, err := r.api.GetBucketObjectLock(ctx, b.ID)
+		if err != nil && !errors.Is(err, client.ErrNotFound) {
+			return rules, err
+		}
+		rules.objectLock = ol
+	}
+	return rules, nil
+}
+
+// Update changes quota_bytes, versioning, public_prefixes, tags, cors_rules,
+// lifecycle_rules and default_object_lock in place.
 func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -240,28 +478,119 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	}
 	defer cancel()
 
-	body, changed, diags := toUpdateRequest(ctx, state, plan)
+	id := state.ID.ValueString()
+	body, bucketChanged, diags := toUpdateRequest(ctx, state, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if !changed {
-		// Only force_destroy or the timeouts changed: nothing to send.
-		state.ForceDestroy, state.Timeouts = plan.ForceDestroy, plan.Timeouts
-		resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+
+	var updatedBucket *client.Bucket
+	if bucketChanged {
+		b, err := r.api.UpdateBucket(ctx, id, body)
+		if err != nil {
+			resourcekit.AddHintedAPIError(&resp.Diagnostics, "Error updating bucket", err, attributeFor, hints)
+			return
+		}
+		final, err := r.waitSettled(ctx, b)
+		if err != nil {
+			resourcekit.AddWaitError(&resp.Diagnostics, "Error updating bucket", kind, b.ID, err)
+			return
+		}
+		updatedBucket = final
+	}
+
+	rules, err := r.updateRules(ctx, id, state, plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
-	b, err := r.api.UpdateBucket(ctx, state.ID.ValueString(), body)
 	if err != nil {
-		resourcekit.AddHintedAPIError(&resp.Diagnostics, "Error updating bucket", err, attributeFor, hints)
+		if updatedBucket != nil {
+			resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, state, updatedBucket, rules, &resp.Diagnostics))...)
+		}
+		resourcekit.AddHintedAPIError(&resp.Diagnostics, "Error updating bucket rules", err, attributeFor, hints)
 		return
 	}
-	final, err := r.waitSettled(ctx, b)
-	if err != nil {
-		resourcekit.AddWaitError(&resp.Diagnostics, "Error updating bucket", kind, b.ID, err)
+
+	if updatedBucket != nil {
+		resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, updatedBucket, rules, &resp.Diagnostics))...)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, fromAPIResponse(ctx, plan, final, &resp.Diagnostics))...)
+
+	// Only rules, force_destroy, or timeouts changed: keep existing bucket fields.
+	next := state
+	next.Tags = stateTags(ctx, plan.Tags, rules.tags, &resp.Diagnostics)
+	next.CORSRules = stateCORSRules(ctx, plan.CORSRules, rules.cors, &resp.Diagnostics)
+	next.LifecycleRules = stateLifecycleRules(ctx, plan.LifecycleRules, rules.lifecycle, &resp.Diagnostics)
+	next.DefaultObjectLock = stateObjectLock(ctx, plan.DefaultObjectLock, rules.objectLock, &resp.Diagnostics)
+	next.ForceDestroy = plan.ForceDestroy
+	next.Timeouts = plan.Timeouts
+	resp.Diagnostics.Append(resp.State.Set(ctx, next)...)
+}
+
+func (r *Resource) updateRules(ctx context.Context, id string, state, plan model, diags *diag.Diagnostics) (bucketRules, error) {
+	hadTags, d := mapToTags(ctx, state.Tags)
+	diags.Append(d...)
+	wantTags, d := mapToTags(ctx, plan.Tags)
+	diags.Append(d...)
+
+	hadCORS, d := listToCORSRules(ctx, state.CORSRules)
+	diags.Append(d...)
+	wantCORS, d := listToCORSRules(ctx, plan.CORSRules)
+	diags.Append(d...)
+
+	hadLC, d := listToLifecycleRules(ctx, state.LifecycleRules)
+	diags.Append(d...)
+	wantLC, d := listToLifecycleRules(ctx, plan.LifecycleRules)
+	diags.Append(d...)
+
+	hadOL, hadOLSet, d := objectToObjectLock(ctx, state.DefaultObjectLock)
+	diags.Append(d...)
+	wantOL, wantOLSet, d := objectToObjectLock(ctx, plan.DefaultObjectLock)
+	diags.Append(d...)
+
+	applied := bucketRules{
+		tags:      hadTags,
+		cors:      hadCORS,
+		lifecycle: hadLC,
+	}
+	if hadOLSet {
+		cp := hadOL
+		applied.objectLock = &cp
+	}
+	if diags.HasError() {
+		return applied, nil
+	}
+
+	if !sameTags(hadTags, wantTags) {
+		out, err := r.api.PutBucketTags(ctx, id, wantTags)
+		if err != nil {
+			return applied, err
+		}
+		applied.tags = out
+	}
+	if !sameCORSRules(hadCORS, wantCORS) {
+		out, err := r.api.PutBucketCORS(ctx, id, wantCORS)
+		if err != nil {
+			return applied, err
+		}
+		applied.cors = out
+	}
+	if !slices.Equal(hadLC, wantLC) {
+		out, err := r.api.PutBucketLifecycle(ctx, id, wantLC)
+		if err != nil {
+			return applied, err
+		}
+		applied.lifecycle = out
+	}
+	if hadOL != wantOL && (wantOLSet || hadOL.Enabled) {
+		out, err := r.api.PutBucketObjectLock(ctx, id, wantOL)
+		if err != nil {
+			return applied, err
+		}
+		applied.objectLock = out
+	}
+	return applied, nil
 }
 
 // Delete deletes the bucket (and its objects with force_destroy), and waits
@@ -401,26 +730,30 @@ func toUpdateRequest(ctx context.Context, state, plan model) (client.UpdateBucke
 }
 
 // fromAPIResponse builds the state. force_destroy and timeouts are Terraform's
-// own, so they come from prev. public_prefixes keeps the configured value
-// (null or empty) when it means the same as what the API reports.
-func fromAPIResponse(ctx context.Context, prev model, b *client.Bucket, diags *diag.Diagnostics) model {
+// own, so they come from prev. Optional collections preserve null vs empty when
+// the configured value matches what the API reports.
+func fromAPIResponse(ctx context.Context, prev model, b *client.Bucket, rules bucketRules, diags *diag.Diagnostics) model {
 	force := prev.ForceDestroy
 	if force.IsNull() || force.IsUnknown() {
 		force = types.BoolValue(false)
 	}
 	return model{
-		ID:             types.StringValue(b.ID),
-		Name:           types.StringValue(b.Name),
-		Region:         types.StringValue(b.Region),
-		QuotaBytes:     types.Int64Value(b.QuotaBytes),
-		Versioning:     types.BoolValue(b.Versioning),
-		ObjectLock:     types.BoolValue(b.ObjectLock),
-		PublicPrefixes: statePrefixes(ctx, prev.PublicPrefixes, b.PublicPrefixes, diags),
-		ForceDestroy:   force,
-		Endpoint:       types.StringValue(b.Endpoint),
-		State:          types.StringValue(b.State),
-		CreatedAt:      resourcekit.Timestamp(b.CreatedAt),
-		Timeouts:       prev.Timeouts,
+		ID:                types.StringValue(b.ID),
+		Name:              types.StringValue(b.Name),
+		Region:            types.StringValue(b.Region),
+		QuotaBytes:        types.Int64Value(b.QuotaBytes),
+		Versioning:        types.BoolValue(b.Versioning),
+		ObjectLock:        types.BoolValue(b.ObjectLock),
+		PublicPrefixes:    statePrefixes(ctx, prev.PublicPrefixes, b.PublicPrefixes, diags),
+		Tags:              stateTags(ctx, prev.Tags, rules.tags, diags),
+		CORSRules:         stateCORSRules(ctx, prev.CORSRules, rules.cors, diags),
+		LifecycleRules:    stateLifecycleRules(ctx, prev.LifecycleRules, rules.lifecycle, diags),
+		DefaultObjectLock: stateObjectLock(ctx, prev.DefaultObjectLock, rules.objectLock, diags),
+		ForceDestroy:      force,
+		Endpoint:          types.StringValue(b.Endpoint),
+		State:             types.StringValue(b.State),
+		CreatedAt:         resourcekit.Timestamp(b.CreatedAt),
+		Timeouts:          prev.Timeouts,
 	}
 }
 
@@ -461,7 +794,7 @@ func sameSet(a, b []string) bool {
 // attributeFor maps the fields a 422 can name to schema attributes.
 func attributeFor(field string) (path.Path, bool) {
 	switch field {
-	case "name", "region", "quota_bytes", "versioning", "object_lock", "public_prefixes":
+	case "name", "region", "quota_bytes", "versioning", "object_lock", "public_prefixes", "tags":
 		return path.Root(field), true
 	}
 	return path.Path{}, false

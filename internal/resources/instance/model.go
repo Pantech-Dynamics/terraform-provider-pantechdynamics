@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 )
@@ -33,9 +35,21 @@ type model struct {
 	PrivateIPv4     types.String   `tfsdk:"private_ipv4"`
 	PrivateNetwork  types.Bool     `tfsdk:"private_network"`
 	PrivateNetIP    types.String   `tfsdk:"private_network_ip"`
+	DynamicIP       types.Object   `tfsdk:"dynamic_ip"`
 	CreatedAt       types.String   `tfsdk:"created_at"`
 	UpdatedAt       types.String   `tfsdk:"updated_at"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
+}
+
+// dynamicIPModel maps the creation-time dynamic_ip nested object.
+type dynamicIPModel struct {
+	Schedule    types.String `tfsdk:"schedule"`
+	Connections types.String `tfsdk:"connections"`
+}
+
+var dynamicIPAttrTypes = map[string]attr.Type{
+	"schedule":    types.StringType,
+	"connections": types.StringType,
 }
 
 // toCreateRequest turns the plan into an API request. Unset optional values are
@@ -58,7 +72,17 @@ func toCreateRequest(ctx context.Context, m model) (client.CreateInstanceRequest
 
 	var diags diag.Diagnostics
 	if !m.Tags.IsNull() && !m.Tags.IsUnknown() {
-		diags = m.Tags.ElementsAs(ctx, &req.Tags, false)
+		diags.Append(m.Tags.ElementsAs(ctx, &req.Tags, false)...)
+	}
+	if !m.DynamicIP.IsNull() && !m.DynamicIP.IsUnknown() {
+		var dip dynamicIPModel
+		diags.Append(m.DynamicIP.As(ctx, &dip, basetypes.ObjectAsOptions{})...)
+		if !diags.HasError() {
+			req.AddressRotation = &client.CreateInstanceDynamicIP{
+				Schedule:    dip.Schedule.ValueString(),
+				Connections: knownString(dip.Connections),
+			}
+		}
 	}
 	return req, diags
 }
@@ -72,8 +96,8 @@ func knownString(v types.String) string {
 }
 
 // fromAPIResponse builds the state from the API object. prev supplies what the
-// API never returns: the timeouts block, and ssh_key_id, because an instance
-// does not report which key it was created with.
+// API never returns: the timeouts block, ssh_key_id, and dynamic_ip, because
+// GET /instances/{id} does not report them.
 func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (model, diag.Diagnostics) {
 	tags := inst.Tags
 	if tags == nil {
@@ -84,6 +108,11 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 	sshKey := prev.SSHKeyID
 	if sshKey.IsUnknown() {
 		sshKey = types.StringNull()
+	}
+
+	dynamicIP := prev.DynamicIP
+	if dynamicIP.IsNull() || dynamicIP.IsUnknown() {
+		dynamicIP = types.ObjectNull(dynamicIPAttrTypes)
 	}
 
 	return model{
@@ -106,6 +135,7 @@ func fromAPIResponse(ctx context.Context, prev model, inst *client.Instance) (mo
 		PrivateIPv4:     types.StringPointerValue(inst.PrivateIPv4),
 		PrivateNetwork:  types.BoolValue(onPrivateNetwork(inst.PrivateNetworkState)),
 		PrivateNetIP:    types.StringPointerValue(inst.PrivateNetworkIP),
+		DynamicIP:       dynamicIP,
 		CreatedAt:       timestampValue(inst.CreatedAt),
 		UpdatedAt:       timestampValue(inst.UpdatedAt),
 		Timeouts:        prev.Timeouts,
@@ -119,6 +149,10 @@ func pendingModel(plan model, id string) model {
 	tags := plan.Tags
 	if tags.IsUnknown() {
 		tags = types.MapNull(types.StringType)
+	}
+	dynamicIP := plan.DynamicIP
+	if dynamicIP.IsNull() || dynamicIP.IsUnknown() {
+		dynamicIP = types.ObjectNull(dynamicIPAttrTypes)
 	}
 	return model{
 		ID:              types.StringValue(id),
@@ -140,6 +174,7 @@ func pendingModel(plan model, id string) model {
 		PrivateIPv4:     types.StringNull(),
 		PrivateNetwork:  pendingBool(plan.PrivateNetwork),
 		PrivateNetIP:    types.StringNull(),
+		DynamicIP:       dynamicIP,
 		CreatedAt:       types.StringNull(),
 		UpdatedAt:       types.StringNull(),
 		Timeouts:        plan.Timeouts,

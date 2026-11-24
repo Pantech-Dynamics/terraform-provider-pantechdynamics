@@ -18,20 +18,36 @@ import (
 	. "github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resourcekit/kittest"
 )
 
-// fakeAPI keeps buckets in memory. A new bucket reads as provisioning once,
-// then active, the way the store settles it.
+// fakeAPI keeps buckets and their rules in memory. A new bucket reads as
+// provisioning once, then active, the way the store settles it.
 type fakeAPI struct {
 	buckets    map[string]*client.Bucket
-	reads      map[string]int
-	createErr  error
-	deleteErr  error
-	lastCreate client.CreateBucketRequest
-	lastUpdate *client.UpdateBucketRequest
-	lastForce  *bool
+	tags       map[string][]client.BucketTag
+	cors       map[string][]client.BucketCORSRule
+	lifecycle  map[string][]client.BucketLifecycleRule
+	objectLock map[string]client.BucketObjectLock
+
+	reads          map[string]int
+	createErr      error
+	deleteErr      error
+	lastCreate     client.CreateBucketRequest
+	lastUpdate     *client.UpdateBucketRequest
+	lastForce      *bool
+	tagPuts        int
+	corsPuts       int
+	lifecyclePuts  int
+	objectLockPuts int
 }
 
 func newFake() *fakeAPI {
-	return &fakeAPI{buckets: map[string]*client.Bucket{}, reads: map[string]int{}}
+	return &fakeAPI{
+		buckets:    map[string]*client.Bucket{},
+		tags:       map[string][]client.BucketTag{},
+		cors:       map[string][]client.BucketCORSRule{},
+		lifecycle:  map[string][]client.BucketLifecycleRule{},
+		objectLock: map[string]client.BucketObjectLock{},
+		reads:      map[string]int{},
+	}
 }
 
 func (f *fakeAPI) CreateBucket(_ context.Context, req client.CreateBucketRequest) (*client.Bucket, error) {
@@ -108,6 +124,48 @@ func (f *fakeAPI) DeleteBucket(_ context.Context, id string, force bool) error {
 	return nil
 }
 
+func (f *fakeAPI) GetBucketCORS(_ context.Context, id string) ([]client.BucketCORSRule, error) {
+	return append([]client.BucketCORSRule{}, f.cors[id]...), nil
+}
+
+func (f *fakeAPI) PutBucketCORS(_ context.Context, id string, rules []client.BucketCORSRule) ([]client.BucketCORSRule, error) {
+	f.corsPuts++
+	f.cors[id] = append([]client.BucketCORSRule{}, rules...)
+	return append([]client.BucketCORSRule{}, rules...), nil
+}
+
+func (f *fakeAPI) GetBucketLifecycle(_ context.Context, id string) ([]client.BucketLifecycleRule, error) {
+	return append([]client.BucketLifecycleRule{}, f.lifecycle[id]...), nil
+}
+
+func (f *fakeAPI) PutBucketLifecycle(_ context.Context, id string, rules []client.BucketLifecycleRule) ([]client.BucketLifecycleRule, error) {
+	f.lifecyclePuts++
+	f.lifecycle[id] = append([]client.BucketLifecycleRule{}, rules...)
+	return append([]client.BucketLifecycleRule{}, rules...), nil
+}
+
+func (f *fakeAPI) GetBucketTags(_ context.Context, id string) ([]client.BucketTag, error) {
+	return append([]client.BucketTag{}, f.tags[id]...), nil
+}
+
+func (f *fakeAPI) PutBucketTags(_ context.Context, id string, tags []client.BucketTag) ([]client.BucketTag, error) {
+	f.tagPuts++
+	f.tags[id] = append([]client.BucketTag{}, tags...)
+	return append([]client.BucketTag{}, tags...), nil
+}
+
+func (f *fakeAPI) GetBucketObjectLock(_ context.Context, id string) (*client.BucketObjectLock, error) {
+	ol := f.objectLock[id]
+	return &ol, nil
+}
+
+func (f *fakeAPI) PutBucketObjectLock(_ context.Context, id string, cfg client.BucketObjectLock) (*client.BucketObjectLock, error) {
+	f.objectLockPuts++
+	f.objectLock[id] = cfg
+	cp := cfg
+	return &cp, nil
+}
+
 func (f *fakeAPI) GetOperation(context.Context, string) (*client.Operation, error) {
 	return &client.Operation{Status: client.OperationFailed}, nil
 }
@@ -134,6 +192,80 @@ func strSet(vals ...string) tftypes.Value {
 		elems = append(elems, Str(v))
 	}
 	return tftypes.NewValue(typ, elems)
+}
+
+func strList(vals ...string) tftypes.Value {
+	typ := tftypes.List{ElementType: tftypes.String}
+	elems := make([]tftypes.Value, 0, len(vals))
+	for _, v := range vals {
+		elems = append(elems, Str(v))
+	}
+	return tftypes.NewValue(typ, elems)
+}
+
+func strMap(m map[string]string) tftypes.Value {
+	typ := tftypes.Map{ElementType: tftypes.String}
+	if m == nil {
+		return tftypes.NewValue(typ, nil)
+	}
+	vals := make(map[string]tftypes.Value, len(m))
+	for k, v := range m {
+		vals[k] = Str(v)
+	}
+	return tftypes.NewValue(typ, vals)
+}
+
+var (
+	corsRuleTFType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":              tftypes.String,
+		"allowed_origins": tftypes.List{ElementType: tftypes.String},
+		"allowed_methods": tftypes.List{ElementType: tftypes.String},
+		"allowed_headers": tftypes.List{ElementType: tftypes.String},
+		"expose_headers":  tftypes.List{ElementType: tftypes.String},
+		"max_age_seconds": tftypes.Number,
+	}}
+	lifecycleRuleTFType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                              tftypes.String,
+		"prefix":                          tftypes.String,
+		"enabled":                         tftypes.Bool,
+		"expiration_days":                 tftypes.Number,
+		"noncurrent_expiration_days":      tftypes.Number,
+		"abort_incomplete_multipart_days": tftypes.Number,
+		"expired_object_delete_marker":    tftypes.Bool,
+	}}
+	defaultObjectLockTFType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"enabled": tftypes.Bool,
+		"mode":    tftypes.String,
+		"days":    tftypes.Number,
+		"years":   tftypes.Number,
+	}}
+)
+
+func corsRulesTF(rules ...map[string]tftypes.Value) tftypes.Value {
+	typ := tftypes.List{ElementType: corsRuleTFType}
+	elems := make([]tftypes.Value, 0, len(rules))
+	for _, r := range rules {
+		elems = append(elems, tftypes.NewValue(corsRuleTFType, r))
+	}
+	return tftypes.NewValue(typ, elems)
+}
+
+func lifecycleRulesTF(rules ...map[string]tftypes.Value) tftypes.Value {
+	typ := tftypes.List{ElementType: lifecycleRuleTFType}
+	elems := make([]tftypes.Value, 0, len(rules))
+	for _, r := range rules {
+		elems = append(elems, tftypes.NewValue(lifecycleRuleTFType, r))
+	}
+	return tftypes.NewValue(typ, elems)
+}
+
+func objectLockTF(enabled bool, mode string, days, years int64) tftypes.Value {
+	return tftypes.NewValue(defaultObjectLockTFType, map[string]tftypes.Value{
+		"enabled": tftypes.NewValue(tftypes.Bool, enabled),
+		"mode":    Str(mode),
+		"days":    Num(days),
+		"years":   Num(years),
+	})
 }
 
 func values(quota int64, versioning bool, prefixes tftypes.Value) map[string]tftypes.Value {
@@ -175,6 +307,179 @@ func TestCreateWaitsUntilActive(t *testing.T) {
 	}
 	if api.lastCreate.Region != "" || !api.lastCreate.Versioning || api.lastCreate.PublicPrefixes != nil {
 		t.Fatalf("sent %+v", api.lastCreate)
+	}
+	if api.tagPuts+api.corsPuts+api.lifecyclePuts+api.objectLockPuts != 0 {
+		t.Fatalf("unset optional rules must not trigger PUTs: tags=%d cors=%d lifecycle=%d lock=%d",
+			api.tagPuts, api.corsPuts, api.lifecyclePuts, api.objectLockPuts)
+	}
+	if !m.Tags.IsNull() || !m.CORSRules.IsNull() || !m.LifecycleRules.IsNull() || !m.DefaultObjectLock.IsNull() {
+		t.Fatalf("unset optional rules must stay null in state: %+v", m)
+	}
+}
+
+func TestCreateReadUpdateAndClearInlineRules(t *testing.T) {
+	api := newFake()
+	s := testSchema(t)
+
+	vals := values(0, true, strSet())
+	vals["object_lock"] = tftypes.NewValue(tftypes.Bool, true)
+	vals["tags"] = strMap(map[string]string{"env": "prod", "team": "core"})
+	vals["cors_rules"] = corsRulesTF(map[string]tftypes.Value{
+		"id":              Str("web"),
+		"allowed_origins": strList("https://app.example.com"),
+		"allowed_methods": strList("GET", "PUT"),
+		"allowed_headers": strList("*"),
+		"expose_headers":  strList("ETag"),
+		"max_age_seconds": Num(3600),
+	})
+	vals["lifecycle_rules"] = lifecycleRulesTF(map[string]tftypes.Value{
+		"id":                              Str("expire-logs"),
+		"prefix":                          Str("logs/"),
+		"enabled":                         tftypes.NewValue(tftypes.Bool, true),
+		"expiration_days":                 Num(30),
+		"noncurrent_expiration_days":      Num(7),
+		"abort_incomplete_multipart_days": Num(3),
+		"expired_object_delete_marker":    tftypes.NewValue(tftypes.Bool, false),
+	})
+	vals["default_object_lock"] = objectLockTF(true, client.ObjectLockModeGovernance, 30, 0)
+
+	cresp := create(t, api, vals)
+	if cresp.Diagnostics.HasError() {
+		t.Fatal(ErrorText(cresp.Diagnostics))
+	}
+	if api.tagPuts != 1 || api.corsPuts != 1 || api.lifecyclePuts != 1 || api.objectLockPuts != 1 {
+		t.Fatalf("puts: tags=%d cors=%d lifecycle=%d lock=%d", api.tagPuts, api.corsPuts, api.lifecyclePuts, api.objectLockPuts)
+	}
+
+	// Read back and verify all rules survive cleanly.
+	rresp := &resource.ReadResponse{State: cresp.State}
+	(&Resource{api: api}).Read(Ctx, resource.ReadRequest{State: cresp.State}, rresp)
+	if rresp.Diagnostics.HasError() {
+		t.Fatal(ErrorText(rresp.Diagnostics))
+	}
+	rm := getModel(t, rresp.State)
+	if len(rm.Tags.Elements()) != 2 || len(rm.CORSRules.Elements()) != 1 || len(rm.LifecycleRules.Elements()) != 1 || rm.DefaultObjectLock.IsNull() {
+		t.Fatalf("read model = %+v", rm)
+	}
+
+	// Update rules in place without patching core bucket settings.
+	uvals := values(0, true, strSet())
+	uvals["id"], uvals["region"], uvals["object_lock"] = Str("bkt_1"), Str("af-abj"), tftypes.NewValue(tftypes.Bool, true)
+	uvals["tags"] = strMap(map[string]string{"env": "staging"})
+	uvals["cors_rules"] = corsRulesTF(map[string]tftypes.Value{
+		"id":              Str("web"),
+		"allowed_origins": strList("*"),
+		"allowed_methods": strList("GET"),
+		"allowed_headers": strList(),
+		"expose_headers":  strList(),
+		"max_age_seconds": Num(600),
+	})
+	uvals["lifecycle_rules"] = lifecycleRulesTF(map[string]tftypes.Value{
+		"id":                              Str("expire-logs"),
+		"prefix":                          Str("logs/"),
+		"enabled":                         tftypes.NewValue(tftypes.Bool, false),
+		"expiration_days":                 Num(90),
+		"noncurrent_expiration_days":      Num(0),
+		"abort_incomplete_multipart_days": Num(0),
+		"expired_object_delete_marker":    tftypes.NewValue(tftypes.Bool, true),
+	})
+	uvals["default_object_lock"] = objectLockTF(true, client.ObjectLockModeCompliance, 0, 1)
+
+	uresp := &resource.UpdateResponse{State: rresp.State}
+	(&Resource{api: api}).Update(Ctx, resource.UpdateRequest{Plan: Plan(s, uvals), State: rresp.State}, uresp)
+	if uresp.Diagnostics.HasError() {
+		t.Fatal(ErrorText(uresp.Diagnostics))
+	}
+	if api.lastUpdate != nil {
+		t.Fatalf("core bucket should not have been patched: %+v", api.lastUpdate)
+	}
+	if api.tagPuts != 2 || api.corsPuts != 2 || api.lifecyclePuts != 2 || api.objectLockPuts != 2 {
+		t.Fatalf("puts after update: tags=%d cors=%d lifecycle=%d lock=%d", api.tagPuts, api.corsPuts, api.lifecyclePuts, api.objectLockPuts)
+	}
+
+	// Clear all optional rule attributes by setting them back to null.
+	clearVals := values(0, true, strSet())
+	clearVals["id"], clearVals["region"], clearVals["object_lock"] = Str("bkt_1"), Str("af-abj"), tftypes.NewValue(tftypes.Bool, true)
+	c2resp := &resource.UpdateResponse{State: uresp.State}
+	(&Resource{api: api}).Update(Ctx, resource.UpdateRequest{Plan: Plan(s, clearVals), State: uresp.State}, c2resp)
+	if c2resp.Diagnostics.HasError() {
+		t.Fatal(ErrorText(c2resp.Diagnostics))
+	}
+	if api.tagPuts != 3 || api.corsPuts != 3 || api.lifecyclePuts != 3 || api.objectLockPuts != 3 {
+		t.Fatalf("puts after clear: tags=%d cors=%d lifecycle=%d lock=%d", api.tagPuts, api.corsPuts, api.lifecyclePuts, api.objectLockPuts)
+	}
+	cm := getModel(t, c2resp.State)
+	if !cm.Tags.IsNull() || !cm.CORSRules.IsNull() || !cm.LifecycleRules.IsNull() || !cm.DefaultObjectLock.IsNull() {
+		t.Fatalf("cleared attributes must be null in state: %+v", cm)
+	}
+	if len(api.tags["bkt_1"]) != 0 || len(api.cors["bkt_1"]) != 0 || len(api.lifecycle["bkt_1"]) != 0 || api.objectLock["bkt_1"].Enabled {
+		t.Fatalf("backend rules should all be cleared")
+	}
+}
+
+func TestValidateConfigBucketRules(t *testing.T) {
+	s := testSchema(t)
+	tests := []struct {
+		name    string
+		set     map[string]tftypes.Value
+		wantErr bool
+		wantSub string
+	}{
+		{
+			"default_object_lock valid with days",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(true, client.ObjectLockModeGovernance, 30, 0)},
+			false, "",
+		},
+		{
+			"default_object_lock valid with years",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(true, client.ObjectLockModeCompliance, 0, 2)},
+			false, "",
+		},
+		{
+			"default_object_lock without object_lock",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, false), "default_object_lock": objectLockTF(true, client.ObjectLockModeGovernance, 30, 0)},
+			true, "requires object_lock = true",
+		},
+		{
+			"default_object_lock with both days and years",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(true, client.ObjectLockModeGovernance, 30, 1)},
+			true, "not both",
+		},
+		{
+			"default_object_lock with neither days nor years",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(true, client.ObjectLockModeGovernance, 0, 0)},
+			true, "positive integer",
+		},
+		{
+			"default_object_lock missing mode when enabled",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(true, "", 30, 0)},
+			true, "Invalid object lock mode",
+		},
+		{
+			"default_object_lock disabled skips mode and duration",
+			map[string]tftypes.Value{"name": Str("uploads"), "object_lock": tftypes.NewValue(tftypes.Bool, true), "default_object_lock": objectLockTF(false, "", 0, 0)},
+			false, "",
+		},
+		{
+			"invalid cors method",
+			map[string]tftypes.Value{"name": Str("uploads"), "cors_rules": corsRulesTF(map[string]tftypes.Value{
+				"id": Str("bad"), "allowed_origins": strList("*"), "allowed_methods": strList("PATCH"),
+				"allowed_headers": strList(), "expose_headers": strList(), "max_age_seconds": Num(0),
+			})},
+			true, "Invalid CORS method",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var resp resource.ValidateConfigResponse
+			(&Resource{}).ValidateConfig(Ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: s, Raw: Object(s, tt.set)}}, &resp)
+			if resp.Diagnostics.HasError() != tt.wantErr {
+				t.Fatalf("diags = %s, wantErr = %v", ErrorText(resp.Diagnostics), tt.wantErr)
+			}
+			if tt.wantSub != "" && !strings.Contains(ErrorText(resp.Diagnostics), tt.wantSub) {
+				t.Fatalf("diags = %s, want %q", ErrorText(resp.Diagnostics), tt.wantSub)
+			}
+		})
 	}
 }
 
