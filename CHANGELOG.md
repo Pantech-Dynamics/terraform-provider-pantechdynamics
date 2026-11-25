@@ -2,9 +2,18 @@
 
 ## Unreleased
 
+## 0.9.0 (2026-11-25)
+
 FEATURES:
 
 - `pantechdynamics_snapshot_schedule`: new `database_id`, for automatic snapshots of a database's data disk.
+- **New resource:** `pantechdynamics_cloud_connection`, a read-only Pantech Migrate connection to an account in another cloud. `cloud` (the API's `provider`, which Terraform reserves: `aws` by default, `gcp`, `azure`, `huawei`, `digitalocean`, `hetzner`, `linode`, `vultr`, `contabo` or `openstack`, checked at plan time) replaces it; `name` changes in place. Read-only `status`, `failure_code`, `failure_message`, `external_account_id`, `access` (`federated` or `agent`), `issuer_url`, `audience`, `subject`, `quick_create_url`, `setup_template` (the CloudFormation template, gcloud or Azure CLI script, or steps), `setup_template_format`, `setup_files`, `permissions`, and for agent clouds `agent_image`, `agent_token_variables`, `agent_token_how_to`, `agent_enroll_command`, `agent_run_command` and `agent_container_command`. Destroy removes the connection and its scans; plans made from it stay. Import by id (`ccn_...`).
+- **New resource:** `pantechdynamics_cloud_connection_federation`, what a federated connection's setup printed: exactly one of `role_arn` (AWS), `gcp`, `azure` or `huawei` (checked at plan time). Create and update wait until Pantech has verified the access (`timeouts` for create and update, default 10m); a failed check stops the apply with the API's message and the next apply sends it again. Separate from the connection so one configuration can create the connection, run its setup with the other cloud's provider, and feed the result back. Destroy only removes it from state. Import by the connection's id.
+- **New data source:** `pantechdynamics_cloud_providers`, the clouds Pantech Migrate can connect, how each is read, and whether a scan reads its spend and people.
+
+NOTES:
+
+- Scans, plans, bucket imports, server copies, database imports and Kubernetes moves are one-shot jobs and are not modelled as resources; use the `pantech migrate` CLI or the API. The Pantech Migrate agent's one-time enrollment code is not modelled either (`pantech migrate agent enroll`).
 
 ## 0.8.0 (2026-11-24)
 

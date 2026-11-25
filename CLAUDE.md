@@ -327,7 +327,8 @@ Paths above are relative to the base URL.
 11. Certificates: `pantechdynamics_certificate` (waits for issuance; CNAME `validation_records`), `pantechdynamics_certificate_import` (key in state; re-import in place), the `pantechdynamics_certificate_export` ephemeral resource (the recommended export: the key never reaches plan or state), and the `certificate`, `certificate_export` (older Terraform; key in state) data sources. **Written against the real handlers with unit tests and an end-to-end run against an in-memory fake, not verified live.**
 12. v0.7.0 prepared 2026-11-10 (CHANGELOG heading; merging to main tags and releases it): DNS on Pantech's own name servers, .ng domains, the domain payment stop, HTTPS load balancers.
 13. Object storage (closed beta): `pantechdynamics_bucket` (`force_destroy`) and `pantechdynamics_object_storage_key` (secret in state). **Written from the backend handlers with unit tests, not verified live.**
-14. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
+14. Pantech Migrate (0.9.0): `pantechdynamics_cloud_connection` (attribute `cloud`, since `provider` is reserved), `pantechdynamics_cloud_connection_federation` (state-only destroy) and the `cloud_providers` data source. Scans, plans and moves are one-shot jobs and stay out of Terraform. **Written from the public contract with unit tests, not verified live.**
+15. Registry publishing (goreleaser, signing, manifest, and confirming the registry namespace). **Not started.**
 
 ## Do not
 
