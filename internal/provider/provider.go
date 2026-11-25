@@ -10,6 +10,7 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/client"
 	dsbucket "github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/bucket"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/certificates"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/cloudproviders"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/containerrepositories"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/databaseengines"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/datasources/diskofferings"
@@ -29,6 +30,8 @@ import (
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/bucket"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificate"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/certificateimport"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/cloudconnection"
+	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/cloudconnectionfederation"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/containerrepository"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/database"
 	"github.com/Pantech-Dynamics/terraform-provider-pantechdynamics/internal/resources/databasesnapshot"
@@ -223,6 +226,8 @@ func (p *PantechDynamicsProvider) Resources(_ context.Context) []func() resource
 		containerrepository.New,
 		database.New,
 		databasesnapshot.New,
+		cloudconnection.New,
+		cloudconnectionfederation.New,
 		dnsrecord.New,
 		dnszone.New,
 		domain.New,
@@ -267,6 +272,7 @@ func (p *PantechDynamicsProvider) DataSources(_ context.Context) []func() dataso
 		certificates.NewExport,
 		containerrepositories.New,
 		containerrepositories.NewSingle,
+		cloudproviders.New,
 		databaseengines.New,
 		diskofferings.New,
 		iam.NewActions,
