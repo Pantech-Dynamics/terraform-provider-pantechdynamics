@@ -13,6 +13,9 @@ Sends what a federated pantechdynamics_cloud_connection's setup printed, exactly
 ## Example Usage
 
 ```terraform
+# The connections are pantechdynamics_cloud_connection resources, as in its
+# example (cloud = "aws", "gcp" and "azure").
+
 # AWS: the RoleArn output of the stack made from the connection's template.
 # Applying waits until Pantech has verified the role.
 resource "pantechdynamics_cloud_connection_federation" "aws" {
